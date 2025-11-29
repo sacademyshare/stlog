@@ -14,16 +14,18 @@ const App = (() => {
     lessonLogs: `${DATA_DIR}/lesson_logs.csv`,
   };
 
-  // 擬似ログイン用ユーザー（デモ用）
+  // 擬似ログイン用ユーザー（デモ用固定ユーザー）
   const DEFAULT_USERS = [
     { id: "admin", password: "admin123", role: "admin", displayName: "管理者" },
     { id: "t001", password: "teacher123", role: "teacher", displayName: "講師 T001" },
+    // デモ用生徒ユーザー（students.csv の S001 に対応）
     { id: "S001", password: "student123", role: "student", displayName: "生徒 S001" },
   ];
 
   const STORAGE_KEYS = {
     CURRENT_USER: "vlm_current_user",
     PASSWORD_OVERRIDES: "vlm_password_overrides",
+    CUSTOM_USERS: "vlm_custom_users", // ユーザー登録画面で作成されたユーザー
   };
 
   const state = {
@@ -54,6 +56,7 @@ const App = (() => {
     bindNavigation();
     bindGlobalButtons();
     bindSettings();
+    bindRegistration();
 
     const savedUser = loadCurrentUser();
     if (savedUser) {
@@ -95,14 +98,18 @@ const App = (() => {
 
   function authenticate(id, password) {
     if (!id) return null;
-    const overrides = loadPasswordOverrides();
-    const overridePw = overrides[id];
 
-    const users = DEFAULT_USERS;
-    const user = users.find((u) => u.id === id);
+    const overrides = loadPasswordOverrides();
+    const customUsers = loadCustomUsers();
+
+    // DEFAULT_USERS + CUSTOM_USERS をマージ
+    const allUsers = DEFAULT_USERS.concat(customUsers);
+    const user = allUsers.find((u) => u.id === id);
     if (!user) return null;
 
+    const overridePw = overrides[id];
     const expectedPw = overridePw || user.password;
+
     if (password !== expectedPw) return null;
 
     return { id: user.id, role: user.role, displayName: user.displayName };
@@ -135,22 +142,32 @@ const App = (() => {
     });
 
     // 設定画面のCSVダウンロード
-    document.getElementById("download-students-csv").addEventListener("click", () => {
-      exportCSV("students", "students.csv");
-    });
-    document.getElementById("download-student-courses-csv").addEventListener("click", () => {
-      exportCSV("studentCourses", "student_courses.csv");
-    });
-    document.getElementById("download-lesson-logs-csv").addEventListener("click", () => {
-      exportCSV("lessonLogs", "lesson_logs.csv");
-    });
-    document.getElementById("download-courses-csv").addEventListener("click", () => {
-      exportCSV("courses", "courses.csv");
-    });
+    document
+      .getElementById("download-students-csv")
+      .addEventListener("click", () => {
+        exportCSV("students", "students.csv");
+      });
+    document
+      .getElementById("download-student-courses-csv")
+      .addEventListener("click", () => {
+        exportCSV("studentCourses", "student_courses.csv");
+      });
+    document
+      .getElementById("download-lesson-logs-csv")
+      .addEventListener("click", () => {
+        exportCSV("lessonLogs", "lesson_logs.csv");
+      });
+    document
+      .getElementById("download-courses-csv")
+      .addEventListener("click", () => {
+        exportCSV("courses", "courses.csv");
+      });
 
     // 生徒フィルタ
     const studentFilter = document.getElementById("student-filter");
-    studentFilter.addEventListener("input", () => renderStudentsTable(studentFilter.value));
+    studentFilter.addEventListener("input", () =>
+      renderStudentsTable(studentFilter.value)
+    );
   }
 
   function applyLoginState(isLoggedIn) {
@@ -188,10 +205,9 @@ const App = (() => {
   function getCurrentStudentId() {
     if (!state.currentUser || state.currentUser.role !== "student") return null;
     const userId = state.currentUser.id;
-    // まず完全一致
     const exact = state.students.find((s) => s.student_id === userId);
     if (exact) return exact.student_id;
-    // 大文字小文字を無視して一致を探す
+
     const lower = String(userId).toLowerCase();
     const byLower = state.students.find(
       (s) => String(s.student_id || "").toLowerCase() === lower
@@ -208,6 +224,9 @@ const App = (() => {
     const studentsNav = document.querySelector('[data-view-target="students"]');
     const coursesNav = document.querySelector('[data-view-target="courses"]');
     const analyticsNav = document.querySelector('[data-view-target="analytics"]');
+    const registrationNav = document.querySelector(
+      '[data-view-target="registration"]'
+    );
 
     // 初期はすべて表示
     navButtons.forEach((btn) => (btn.style.display = "inline-flex"));
@@ -216,12 +235,11 @@ const App = (() => {
       // 講師は全生徒を管理できるが、設定画面は不要
       if (settingsNav) settingsNav.style.display = "none";
     } else if (role === "student") {
-      // 生徒は「自分の情報のみ」操作可能
-      // 全体の講座マスタ・分析・設定は非表示
+      // 生徒は自分の情報のみ操作可能
       if (coursesNav) coursesNav.style.display = "none";
       if (settingsNav) settingsNav.style.display = "none";
       if (analyticsNav) analyticsNav.style.display = "none";
-      // 生徒ビュー（マイページ）は表示したまま
+      if (registrationNav) registrationNav.style.display = "none";
       if (studentsNav) studentsNav.style.display = "inline-flex";
     }
   }
@@ -274,6 +292,7 @@ const App = (() => {
       courses: "view-courses",
       calendar: "view-calendar",
       analytics: "view-analytics",
+      registration: "view-registration",
       settings: "view-settings",
     };
     Object.values(views).forEach((id) => {
@@ -321,7 +340,9 @@ const App = (() => {
       console.error(e);
       statusBadge.textContent = "読込エラー";
       statusBadge.classList.add("badge--danger");
-      showToast("CSVの読み込みに失敗しました。パスやCORS設定をご確認ください。");
+      showToast(
+        "CSVの読み込みに失敗しました。パスやCORS設定をご確認ください。"
+      );
     }
   }
 
@@ -336,7 +357,7 @@ const App = (() => {
   }
 
   function parseCSV(text) {
-    const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const lines = text.replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n");
     const filtered = lines.filter((line) => line.trim() !== "");
     if (filtered.length === 0) {
       return { headers: [], rows: [] };
@@ -356,7 +377,6 @@ const App = (() => {
     return { headers, rows };
   }
 
-  // シンプルなCSV行パーサ（ダブルクオート対応、埋め込みカンマは不可）
   function splitCsvLine(line) {
     const result = [];
     let current = "";
@@ -386,7 +406,7 @@ const App = (() => {
     const escape = (value) => {
       if (value == null) return "";
       const s = String(value);
-      if (/[",\n]/.test(s)) {
+      if (/[",\\n]/.test(s)) {
         return `"${s.replace(/"/g, '""')}"`;
       }
       return s;
@@ -398,7 +418,7 @@ const App = (() => {
       const line = headers.map((h) => escape(row[h])).join(",");
       lines.push(line);
     });
-    return lines.join("\r\n");
+    return lines.join("\\r\\n");
   }
 
   // ====== レンダリング ======
@@ -419,18 +439,26 @@ const App = (() => {
     studentCountEl.textContent = state.students.length;
 
     const now = new Date();
-    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const monthlyLogs = state.lessonLogs.filter((log) => log.date && log.date.startsWith(ym));
-    const monthlyCount = monthlyLogs.reduce((sum, log) => sum + Number(log.count || 0), 0);
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}`;
+    const monthlyLogs = state.lessonLogs.filter(
+      (log) => log.date && log.date.startsWith(ym)
+    );
+    const monthlyCount = monthlyLogs.reduce(
+      (sum, log) => sum + Number(log.count || 0),
+      0
+    );
     monthlyLogsEl.textContent = monthlyCount;
 
-    // 全体平均達成率（生徒×講座ごとの進捗平均）
     const progresses = getAllStudentCourseProgress();
     if (progresses.length === 0) {
       avgProgressEl.textContent = "-";
     } else {
       const avg =
-        progresses.reduce((sum, p) => sum + p.progressRate, 0) / progresses.length;
+        progresses.reduce((sum, p) => sum + p.progressRate, 0) /
+        progresses.length;
       avgProgressEl.textContent = Math.round(avg);
     }
 
@@ -441,7 +469,6 @@ const App = (() => {
     const container = document.getElementById("dashboard-course-summary");
     if (!container) return;
 
-    // 講座別に planned / actual を集約
     const map = new Map();
     state.studentCourses.forEach((sc) => {
       const key = sc.course_id;
@@ -471,7 +498,8 @@ const App = (() => {
     }
 
     let html = "<table><thead><tr>";
-    html += "<th>講座ID</th><th>講座名</th><th>受講者数</th><th>予定コマ数</th><th>実績コマ数</th><th>達成率</th>";
+    html +=
+      "<th>講座ID</th><th>講座名</th><th>受講者数</th><th>予定コマ数</th><th>実績コマ数</th><th>達成率</th>";
     html += "</tr></thead><tbody>";
 
     for (const item of map.values()) {
@@ -499,7 +527,6 @@ const App = (() => {
 
     let students = state.students;
 
-    // 生徒ロールは自分自身のみ表示
     if (state.currentUser && state.currentUser.role === "student") {
       const myId = getCurrentStudentId();
       students = myId ? students.filter((s) => s.student_id === myId) : [];
@@ -557,7 +584,6 @@ const App = (() => {
     const label = document.getElementById("student-detail-label");
     if (!student || !container) return;
 
-    // 生徒ロールの場合は自分自身のレコードのみ閲覧可能
     const currentRole = state.currentUser ? state.currentUser.role : null;
     if (currentRole === "student") {
       const myId = getCurrentStudentId();
@@ -569,7 +595,6 @@ const App = (() => {
 
     label.textContent = `${student.student_id} / ${student.grade} / ${student.course_group}`;
 
-    // この生徒の講座設定
     const scList = state.studentCourses.filter((sc) => sc.student_id === studentId);
 
     let html = '<div class="student-detail__header">';
@@ -616,7 +641,6 @@ const App = (() => {
       html += "</tbody></table></div>";
     }
 
-    // 受講講座追加フォーム（管理者・講師・本人）
     html += '<h4 class="student-detail__section-title">受講講座の追加</h4>';
     const availableCourses = state.courses.filter(
       (c) => !scList.some((sc) => sc.course_id === c.course_id)
@@ -645,11 +669,10 @@ const App = (() => {
       html +=
         '<button type="submit" class="btn btn--outline btn--small">講座を追加</button>';
       html +=
-        '<p class="muted small">※ 追加された講座は student_courses.csv に反映されます（CSVダウンロードで取得）。</p>';
+        '<p class="muted small">※ 追加された講座は student_courses.csv に反映されます（CSVダウンロードが必要）。</p>';
       html += "</form>";
     }
 
-    // 受講ログ登録フォーム
     html += '<h4 class="student-detail__section-title">受講ログ登録（実績）</h4>';
     html += '<form id="log-form" class="settings-form">';
     html += '<div class="form-row">';
@@ -675,10 +698,9 @@ const App = (() => {
     html +=
       '<button type="submit" class="btn btn--primary btn--small">ログ追加</button>';
     html +=
-      '<p class="muted small">※ 追加したログは lesson_logs.csv に反映されます（CSVダウンロードで取得）。</p>';
+      '<p class="muted small">※ 追加したログは lesson_logs.csv に反映されます（CSVダウンロードが必要）。</p>';
     html += "</form>";
 
-    // カレンダー
     html += '<h4 class="student-detail__section-title">月間カレンダー</h4>';
     html += '<div id="student-calendar" class="calendar"></div>';
     html +=
@@ -728,10 +750,11 @@ const App = (() => {
       return;
     }
 
-    // log_id を一意になるように採番（YYYYMMDD-studentId-連番）
     const dateKey = date.replace(/-/g, "");
     const baseId = `${dateKey}-${studentId}`;
-    const existing = state.lessonLogs.filter((l) => l.log_id && l.log_id.startsWith(baseId));
+    const existing = state.lessonLogs.filter(
+      (l) => l.log_id && l.log_id.startsWith(baseId)
+    );
     const seq = existing.length + 1;
     const logId = `${baseId}-${seq}`;
 
@@ -750,13 +773,14 @@ const App = (() => {
     state.lessonLogs.push(newRow);
     state.unsaved.lessonLogs = true;
 
-    // 再描画
     openStudentDetail(studentId);
     renderGlobalCalendar();
     renderDashboard();
     renderAnalytics();
 
-    showToast("受講ログを追加しました。CSVダウンロードを忘れずに行ってください。");
+    showToast(
+      "受講ログを追加しました。lesson_logs.csv のダウンロードと GitHub への反映を行ってください。"
+    );
   }
 
   function addStudentCourseFromForm(studentId) {
@@ -808,7 +832,9 @@ const App = (() => {
     renderAnalytics();
     renderDashboard();
 
-    showToast("受講講座を追加しました。CSVダウンロードを忘れずに行ってください。");
+    showToast(
+      "受講講座を追加しました。student_courses.csv のダウンロードと GitHub への反映を行ってください。"
+    );
   }
 
   // --- 講座一覧 ---
@@ -881,7 +907,10 @@ const App = (() => {
       const dateStr = formatDate(cellDate);
 
       const logs = state.lessonLogs.filter((log) => log.date === dateStr);
-      const totalCount = logs.reduce((sum, log) => sum + Number(log.count || 0), 0);
+      const totalCount = logs.reduce(
+        (sum, log) => sum + Number(log.count || 0),
+        0
+      );
 
       const cell = document.createElement("div");
       cell.className = "calendar__cell";
@@ -970,7 +999,10 @@ const App = (() => {
       const logs = state.lessonLogs.filter(
         (log) => log.date === dateStr && log.student_id === studentId
       );
-      const totalCount = logs.reduce((sum, log) => sum + Number(log.count || 0), 0);
+      const totalCount = logs.reduce(
+        (sum, log) => sum + Number(log.count || 0),
+        0
+      );
 
       const cell = document.createElement("div");
       cell.className = "calendar__cell";
@@ -1100,7 +1132,7 @@ const App = (() => {
 
       const overrides = loadPasswordOverrides();
       const userId = state.currentUser.id;
-      const users = DEFAULT_USERS;
+      const users = DEFAULT_USERS.concat(loadCustomUsers());
       const def = users.find((u) => u.id === userId);
       const expectedCurrent = overrides[userId] || (def && def.password);
       if (!expectedCurrent || current !== expectedCurrent) {
@@ -1139,11 +1171,111 @@ const App = (() => {
     }
   }
 
+  // ====== ユーザー登録（カスタムユーザー） ======
+  function bindRegistration() {
+    const form = document.getElementById("registration-form");
+    const msgEl = document.getElementById("registration-message");
+    if (!form) return;
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      msgEl.textContent = "";
+      msgEl.style.color = "#b91c1c";
+
+      if (!state.currentUser || (state.currentUser.role !== "admin" && state.currentUser.role !== "teacher")) {
+        msgEl.textContent = "管理者または講師のみユーザー登録が可能です。";
+        return;
+      }
+
+      const id = document.getElementById("reg-student-id").value.trim();
+      const grade = document.getElementById("reg-grade").value.trim();
+      const courseGroup = document
+        .getElementById("reg-course-group")
+        .value.trim();
+      const status = document.getElementById("reg-status").value || "active";
+      const password = document.getElementById("reg-password").value;
+
+      if (!id || !grade || !password) {
+        msgEl.textContent = "生徒ID・学年・初期パスワードは必須です。";
+        return;
+      }
+
+      // 既存ユーザーとの重複チェック
+      const existsUser =
+        DEFAULT_USERS.concat(loadCustomUsers()).find((u) => u.id === id) !=
+        null;
+      if (existsUser) {
+        msgEl.textContent =
+          "このユーザーIDはすでに登録されています。（パスワード変更は設定画面から行ってください。）";
+        return;
+      }
+
+      // students に追加（すでに存在していなければ）
+      const existsStudent = state.students.some((s) => s.student_id === id);
+      if (!existsStudent) {
+        const newStudent = {
+          student_id: id,
+          grade,
+          course_group: courseGroup,
+          status,
+        };
+        state.students.push(newStudent);
+        state.unsaved.students = true;
+        renderStudentsTable(document.getElementById("student-filter").value);
+        renderDashboard();
+        renderAnalytics();
+      }
+
+      // カスタムユーザーとして localStorage に保存
+      const customUsers = loadCustomUsers();
+      customUsers.push({
+        id,
+        password,
+        role: "student",
+        displayName: `生徒 ${id}`,
+      });
+      saveCustomUsers(customUsers);
+
+      // パスワードオーバーライドにもセット
+      const overrides = loadPasswordOverrides();
+      overrides[id] = password;
+      savePasswordOverrides(overrides);
+
+      form.reset();
+      msgEl.textContent =
+        "ユーザーを登録しました。students.csv をダウンロードして GitHub に反映させてください。";
+      msgEl.style.color = "#16a34a";
+      showToast("新しい生徒ユーザーを登録しました。");
+    });
+  }
+
+  function loadCustomUsers() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOM_USERS);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed;
+    } catch {
+      return [];
+    }
+  }
+
+  function saveCustomUsers(list) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_USERS, JSON.stringify(list));
+    } catch (e) {
+      console.warn("Failed to save custom users", e);
+    }
+  }
+
   // ====== CSVエクスポート ======
   function exportCSV(kind, filename) {
     const headers = state.headers[kind];
     if (!headers || headers.length === 0) {
-      showToast("ヘッダー情報がありません。CSVを読み込めているか確認してください。");
+      showToast(
+        "ヘッダー情報がありません。CSVを読み込めているか確認してください。"
+      );
       return;
     }
     const rows = state[kind];
@@ -1193,7 +1325,6 @@ const App = (() => {
     }, 2800);
   }
 
-  // 公開APIは特に不要だが、テストしやすいように最低限返しておく
   return {
     init,
   };
