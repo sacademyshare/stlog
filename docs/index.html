@@ -30,7 +30,7 @@
           <ul>
             <li>管理者: <code>admin / admin123</code></li>
             <li>講師: <code>t001 / teacher123</code></li>
-            <li>生徒: <code>s001 / student123</code></li>
+            <li>生徒: <code>S001 / student123</code></li>
           </ul>
         </details>
       </div>
@@ -58,10 +58,10 @@
         <nav class="app-nav">
           <button class="app-nav__item app-nav__item--active" data-view-target="dashboard">ダッシュボード</button>
           <button class="app-nav__item" data-view-target="students">生徒</button>
-          <button class="app-nav__item" data-view-target="registration">ユーザー登録</button>
           <button class="app-nav__item" data-view-target="courses">講座</button>
           <button class="app-nav__item" data-view-target="calendar">カレンダー</button>
           <button class="app-nav__item" data-view-target="analytics">分析</button>
+          <button class="app-nav__item" data-view-target="registration">ユーザー登録</button>
           <button class="app-nav__item" data-view-target="settings">設定</button>
         </nav>
 
@@ -92,10 +92,11 @@
             </section>
           </section>
 
-          <!-- 生徒一覧／詳細 -->
+          <!-- 生徒一覧／詳細（講師・管理者用）／マイページ（生徒用） -->
           <section id="view-students" class="view">
             <h2 class="view-title">生徒</h2>
             <div class="split split--2">
+              <!-- 左：生徒一覧（生徒ロールでは非表示） -->
               <div class="split__pane">
                 <header class="section__header">
                   <h3>生徒一覧</h3>
@@ -105,10 +106,12 @@
                 </header>
                 <div id="students-table" class="table-wrapper"></div>
               </div>
+
+              <!-- 右：詳細 or マイページ -->
               <div class="split__pane split__pane--detail">
                 <header class="section__header">
-                  <h3>生徒詳細</h3>
-                  <span id="student-detail-label" class="muted">左の一覧から生徒を選択してください</span>
+                  <h3>生徒詳細 / マイページ</h3>
+                  <span id="student-detail-label" class="muted">左の一覧から生徒を選択するか、生徒としてログインしてください。</span>
                 </header>
                 <div id="student-detail" class="student-detail"></div>
               </div>
@@ -129,7 +132,7 @@
             </section>
           </section>
 
-          <!-- カレンダー（全体ビュー） -->
+          <!-- カレンダー（全体） -->
           <section id="view-calendar" class="view">
             <h2 class="view-title">カレンダー</h2>
             <section class="section">
@@ -157,8 +160,7 @@
             </section>
           </section>
 
-          <!-- 設定 -->
-                    <!-- ユーザー登録 -->
+          <!-- ユーザー登録 -->
           <section id="view-registration" class="view">
             <h2 class="view-title">ユーザー登録</h2>
             <section class="section">
@@ -202,7 +204,7 @@
           </section>
 
           <!-- 設定 -->
-<section id="view-settings" class="view">
+          <section id="view-settings" class="view">
             <h2 class="view-title">設定</h2>
             <section class="section">
               <header class="section__header">
