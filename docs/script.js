@@ -6,7 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 const App = (() => {
-  const DATA_DIR = "../data";
+  const DATA_DIR = "/data";
   const CSV_PATHS = {
     students: `${DATA_DIR}/students.csv`,
     courses: `${DATA_DIR}/courses.csv`,
