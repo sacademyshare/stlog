@@ -63,6 +63,10 @@ const App = (() => {
       state.currentUser = savedUser;
       applyLoginState(true);
       refreshUserLabel();
+      // 生徒ならマイページをデフォルト表示
+      if (state.currentUser.role === "student") {
+        activateNavForView("students");
+      }
       loadAllCSVs();
     } else {
       applyLoginState(false);
@@ -91,6 +95,12 @@ const App = (() => {
       saveCurrentUser(user);
       applyLoginState(true);
       refreshUserLabel();
+
+      // 生徒はログイン直後から「自分のマイページ」を表示
+      if (user.role === "student") {
+        activateNavForView("students");
+      }
+
       loadAllCSVs();
       showToast("ログインしました。");
     });
@@ -199,6 +209,16 @@ const App = (() => {
         : "生徒";
     label.textContent = `${roleText}: ${state.currentUser.displayName}（ID: ${state.currentUser.id}）`;
     applyRoleVisibility();
+  }
+
+  // ナビゲーションのアクティブ状態を外部から変更するヘルパー
+  function activateNavForView(viewName) {
+    setActiveView(viewName);
+    const navButtons = document.querySelectorAll(".app-nav__item");
+    navButtons.forEach((btn) => {
+      const target = btn.getAttribute("data-view-target");
+      btn.classList.toggle("app-nav__item--active", target === viewName);
+    });
   }
 
   // 現在ログインしている生徒ユーザーに対応する student_id を取得
@@ -335,6 +355,15 @@ const App = (() => {
       statusBadge.classList.add("badge--success");
 
       renderAll();
+
+      // 生徒は常に自分のマイページを自動表示し、選択不要にする
+      if (state.currentUser && state.currentUser.role === "student") {
+        const sid = getCurrentStudentId();
+        if (sid) {
+          setupStudentMyPageLayout(sid);
+        }
+      }
+
       if (showToastFlag) showToast("GitHub上のCSVを再読込しました。");
     } catch (e) {
       console.error(e);
@@ -578,6 +607,27 @@ const App = (() => {
     });
   }
 
+  // 生徒ロールのときに「生徒一覧不要・自分の情報だけ表示」にするレイアウト調整
+  function setupStudentMyPageLayout(studentId) {
+    const studentsView = document.getElementById("view-students");
+    if (!studentsView) return;
+
+    const split = studentsView.querySelector(".split");
+    const listPane = studentsView.querySelector(".split__pane");
+    const detailPane = studentsView.querySelector(".split__pane--detail");
+    const label = document.getElementById("student-detail-label");
+
+    if (split && listPane && detailPane) {
+      split.classList.add("split--single");
+      listPane.style.display = "none"; // 生徒一覧は非表示
+    }
+    if (label) {
+      label.textContent = "あなたの受講状況を表示しています。";
+    }
+
+    openStudentDetail(studentId);
+  }
+
   function openStudentDetail(studentId) {
     const student = state.students.find((s) => s.student_id === studentId);
     const container = document.getElementById("student-detail");
@@ -585,30 +635,42 @@ const App = (() => {
     if (!student || !container) return;
 
     const currentRole = state.currentUser ? state.currentUser.role : null;
-    if (currentRole === "student") {
-      const myId = getCurrentStudentId();
-      if (myId && studentId !== myId) {
-        showToast("自分以外の生徒情報は閲覧できません。");
-        return;
-      }
+    const myId =
+      currentRole === "student" ? getCurrentStudentId() : null;
+    const isStudentSelf =
+      currentRole === "student" && myId && studentId === myId;
+
+    if (currentRole === "student" && !isStudentSelf) {
+      showToast("自分以外の生徒情報は閲覧できません。");
+      return;
     }
 
-    label.textContent = `${student.student_id} / ${student.grade} / ${student.course_group}`;
+    if (label) {
+      label.textContent = isStudentSelf
+        ? `マイページ（ID: ${student.student_id} / 学年: ${student.grade}）`
+        : `${student.student_id} / ${student.grade} / ${student.course_group}`;
+    }
 
     const scList = state.studentCourses.filter((sc) => sc.student_id === studentId);
 
     let html = '<div class="student-detail__header">';
-    html += `<h3 class="student-detail__title">${escapeHtml(
-      student.student_id
-    )}</h3>`;
+    html += `<h3 class="student-detail__title">${
+      isStudentSelf ? "あなたの受講状況" : escapeHtml(student.student_id)
+    }</h3>`;
     html += `<div class="student-detail__meta">学年: ${escapeHtml(
       student.grade
     )} / コース群: ${escapeHtml(student.course_group)}</div>`;
+    if (isStudentSelf) {
+      html +=
+        '<p class="student-detail__intro">① 現在の受講講座と進捗 を確認 → ② 「講座を追加」カードで受講講座を増やす → ③ 「今日の実績を記録」カードで受講後すぐに登録、という流れで使えます。</p>';
+    }
     html += "</div>";
 
-    html += '<h4 class="student-detail__section-title">受講講座</h4>';
+    // ① 現在の受講講座と進捗
+    html += '<h4 class="student-detail__section-title">① 現在の受講講座と進捗</h4>';
     if (scList.length === 0) {
-      html += '<p class="muted small">講座設定がありません。</p>';
+      html +=
+        '<p class="muted small">まだ受講講座が設定されていません。次の「② 講座を追加」から登録してください。</p>';
     } else {
       html += '<div class="table-wrapper small-scroll"><table><thead><tr>';
       html +=
@@ -641,18 +703,27 @@ const App = (() => {
       html += "</tbody></table></div>";
     }
 
-    html += '<h4 class="student-detail__section-title">受講講座の追加</h4>';
+    // ② 講座追加・③ 実績追加をカード形式で並べる
+    html += '<div class="student-detail__cards">';
+
+    // ② 受講講座追加カード
     const availableCourses = state.courses.filter(
       (c) => !scList.some((sc) => sc.course_id === c.course_id)
     );
+    html += '<div class="student-detail__card">';
+    html += '<h5 class="student-detail__card-title">② 受講講座を追加</h5>';
+    html +=
+      '<div class="student-detail__card-body">これから受講する講座をここで登録します。予定コマ数と期間を入れておくと、達成率が自動で計算されます。</div>';
+
     if (availableCourses.length === 0) {
-      html += '<p class="muted small">追加可能な講座はありません。</p>';
+      html +=
+        '<p class="muted small" style="margin-top:0.5rem;">追加可能な講座はありません。講座マスタに講座を登録してください。</p>';
     } else {
-      html += '<form id="student-course-form" class="settings-form">';
+      html += '<form id="student-course-form" class="settings-form" style="margin-top:0.5rem;">';
       html += '<div class="form-row">';
       html +=
-        '<label class="form-field"><span>講座</span><select id="student-course-id" required>';
-      html += '<option value="">選択してください</option>';
+        '<label class="form-field"><span>講座を選ぶ</span><select id="student-course-id" required>';
+      html += '<option value="">講座を選択してください</option>';
       availableCourses.forEach((c) => {
         html += `<option value="${escapeHtml(c.course_id)}">${escapeHtml(
           c.course_id
@@ -660,30 +731,35 @@ const App = (() => {
       });
       html += "</select></label>";
       html +=
-        '<label class="form-field"><span>予定コマ数</span><input type="number" id="student-course-planned" min="1" value="1" required /></label>';
+        '<label class="form-field"><span>予定コマ数</span><input type="number" id="student-course-planned" min="1" value="10" required /></label>';
       html +=
         '<label class="form-field"><span>開始日</span><input type="date" id="student-course-start" required /></label>';
       html +=
         '<label class="form-field"><span>終了日</span><input type="date" id="student-course-end" required /></label>';
       html += "</div>";
       html +=
-        '<button type="submit" class="btn btn--outline btn--small">講座を追加</button>';
+        '<button type="submit" class="btn btn--outline btn--small">この講座を追加する</button>';
       html +=
-        '<p class="muted small">※ 追加された講座は student_courses.csv に反映されます（CSVダウンロードが必要）。</p>';
+        '<p class="muted small">※ 登録後、「① 現在の受講講座と進捗」に反映されます。student_courses.csv のダウンロードも忘れずに。</p>';
       html += "</form>";
     }
+    html += "</div>"; // card
 
-    html += '<h4 class="student-detail__section-title">受講ログ登録（実績）</h4>';
-    html += '<form id="log-form" class="settings-form">';
+    // ③ 実績追加カード
+    html += '<div class="student-detail__card">';
+    html += '<h5 class="student-detail__card-title">③ 今日の受講実績を記録</h5>';
+    html +=
+      '<div class="student-detail__card-body">映像授業を受け終わったら、その日のうちにここから「何コマ受講したか」を登録します。</div>';
+    html += '<form id="log-form" class="settings-form" style="margin-top:0.5rem;">';
     html += '<div class="form-row">';
     html +=
       '<label class="form-field"><span>日付</span><input type="date" id="log-date" required /></label>';
     html +=
       '<label class="form-field"><span>講座</span><select id="log-course" required>';
     if (scList.length === 0) {
-      html += '<option value="">講座設定なし</option>';
+      html += '<option value="">まず講座を追加してください</option>';
     } else {
-      html += '<option value="">選択してください</option>';
+      html += '<option value="">講座を選択してください</option>';
       scList.forEach((sc) => {
         const course = state.courses.find((c) => c.course_id === sc.course_id);
         html += `<option value="${escapeHtml(sc.course_id)}">${escapeHtml(
@@ -693,15 +769,19 @@ const App = (() => {
     }
     html += "</select></label>";
     html +=
-      '<label class="form-field"><span>コマ数</span><input type="number" id="log-count" min="1" value="1" required /></label>';
+      '<label class="form-field"><span>受講したコマ数</span><input type="number" id="log-count" min="1" value="1" required /></label>';
     html += "</div>";
     html +=
-      '<button type="submit" class="btn btn--primary btn--small">ログ追加</button>';
+      '<button type="submit" class="btn btn--primary btn--small">この内容で実績を追加</button>';
     html +=
-      '<p class="muted small">※ 追加したログは lesson_logs.csv に反映されます（CSVダウンロードが必要）。</p>';
+      '<p class="muted small">※ 追加した実績は lesson_logs.csv に反映されます。必要に応じて CSV をダウンロードし、GitHub へ反映してください。</p>';
     html += "</form>";
+    html += "</div>"; // card
 
-    html += '<h4 class="student-detail__section-title">月間カレンダー</h4>';
+    html += "</div>"; // cards
+
+    // カレンダー
+    html += '<h4 class="student-detail__section-title">④ 月間カレンダー</h4>';
     html += '<div id="student-calendar" class="calendar"></div>';
     html +=
       '<p class="muted small">※ 各日の「実績」はこの生徒の全講座合計コマ数です。</p>';
@@ -722,6 +802,22 @@ const App = (() => {
         e.preventDefault();
         addStudentCourseFromForm(studentId);
       });
+    }
+
+    // デフォルト値: 今日の日付をセット / 期間の初期値を自動設定
+    const todayStr = formatDate(new Date());
+    const logDateInput = document.getElementById("log-date");
+    if (logDateInput) {
+      logDateInput.value = todayStr;
+    }
+    const startInput = document.getElementById("student-course-start");
+    const endInput = document.getElementById("student-course-end");
+    if (startInput && endInput) {
+      const start = new Date();
+      const end = new Date();
+      end.setMonth(end.getMonth() + 3); // とりあえず3ヶ月後
+      startInput.value = formatDate(start);
+      endInput.value = formatDate(end);
     }
 
     renderStudentCalendar(studentId);
@@ -1182,7 +1278,10 @@ const App = (() => {
       msgEl.textContent = "";
       msgEl.style.color = "#b91c1c";
 
-      if (!state.currentUser || (state.currentUser.role !== "admin" && state.currentUser.role !== "teacher")) {
+      if (
+        !state.currentUser ||
+        (state.currentUser.role !== "admin" && state.currentUser.role !== "teacher")
+      ) {
         msgEl.textContent = "管理者または講師のみユーザー登録が可能です。";
         return;
       }
@@ -1200,7 +1299,6 @@ const App = (() => {
         return;
       }
 
-      // 既存ユーザーとの重複チェック
       const existsUser =
         DEFAULT_USERS.concat(loadCustomUsers()).find((u) => u.id === id) !=
         null;
@@ -1210,7 +1308,6 @@ const App = (() => {
         return;
       }
 
-      // students に追加（すでに存在していなければ）
       const existsStudent = state.students.some((s) => s.student_id === id);
       if (!existsStudent) {
         const newStudent = {
@@ -1226,7 +1323,6 @@ const App = (() => {
         renderAnalytics();
       }
 
-      // カスタムユーザーとして localStorage に保存
       const customUsers = loadCustomUsers();
       customUsers.push({
         id,
@@ -1236,7 +1332,6 @@ const App = (() => {
       });
       saveCustomUsers(customUsers);
 
-      // パスワードオーバーライドにもセット
       const overrides = loadPasswordOverrides();
       overrides[id] = password;
       savePasswordOverrides(overrides);
