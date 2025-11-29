@@ -386,7 +386,7 @@ const App = (() => {
   }
 
   function parseCSV(text) {
-    const lines = text.replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n");
+    const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
     const filtered = lines.filter((line) => line.trim() !== "");
     if (filtered.length === 0) {
       return { headers: [], rows: [] };
@@ -435,7 +435,7 @@ const App = (() => {
     const escape = (value) => {
       if (value == null) return "";
       const s = String(value);
-      if (/[",\\n]/.test(s)) {
+      if (/["\n,]/.test(s)) {
         return `"${s.replace(/"/g, '""')}"`;
       }
       return s;
@@ -447,7 +447,7 @@ const App = (() => {
       const line = headers.map((h) => escape(row[h])).join(",");
       lines.push(line);
     });
-    return lines.join("\\r\\n");
+    return lines.join("\r\n");
   }
 
   // ====== レンダリング ======
@@ -614,10 +614,9 @@ const App = (() => {
 
     const split = studentsView.querySelector(".split");
     const listPane = studentsView.querySelector(".split__pane");
-    const detailPane = studentsView.querySelector(".split__pane--detail");
     const label = document.getElementById("student-detail-label");
 
-    if (split && listPane && detailPane) {
+    if (split && listPane) {
       split.classList.add("split--single");
       listPane.style.display = "none"; // 生徒一覧は非表示
     }
@@ -670,7 +669,7 @@ const App = (() => {
     html += '<h4 class="student-detail__section-title">① 現在の受講講座と進捗</h4>';
     if (scList.length === 0) {
       html +=
-        '<p class="muted small">まだ受講講座が設定されていません。次の「② 講座を追加」から登録してください。</p>';
+        '<p class="muted small">まだ受講講座が設定されていません。次の「② 受講講座を追加」から登録してください。</p>';
     } else {
       html += '<div class="table-wrapper small-scroll"><table><thead><tr>';
       html +=
