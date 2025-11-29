@@ -58,6 +58,7 @@
         <nav class="app-nav">
           <button class="app-nav__item app-nav__item--active" data-view-target="dashboard">ダッシュボード</button>
           <button class="app-nav__item" data-view-target="students">生徒</button>
+          <button class="app-nav__item" data-view-target="registration">ユーザー登録</button>
           <button class="app-nav__item" data-view-target="courses">講座</button>
           <button class="app-nav__item" data-view-target="calendar">カレンダー</button>
           <button class="app-nav__item" data-view-target="analytics">分析</button>
@@ -157,7 +158,51 @@
           </section>
 
           <!-- 設定 -->
-          <section id="view-settings" class="view">
+                    <!-- ユーザー登録 -->
+          <section id="view-registration" class="view">
+            <h2 class="view-title">ユーザー登録</h2>
+            <section class="section">
+              <header class="section__header">
+                <h3>新規生徒ユーザー登録</h3>
+              </header>
+              <form id="registration-form" class="settings-form">
+                <div class="form-row">
+                  <label class="form-field">
+                    <span>生徒ID（student_id）</span>
+                    <input type="text" id="reg-student-id" placeholder="S004 など" required />
+                  </label>
+                  <label class="form-field">
+                    <span>学年</span>
+                    <input type="text" id="reg-grade" placeholder="J2 / H1 など" required />
+                  </label>
+                  <label class="form-field">
+                    <span>コース群</span>
+                    <input type="text" id="reg-course-group" placeholder="高1文系 など" />
+                  </label>
+                  <label class="form-field">
+                    <span>ステータス</span>
+                    <select id="reg-status">
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                    </select>
+                  </label>
+                  <label class="form-field">
+                    <span>初期パスワード</span>
+                    <input type="password" id="reg-password" placeholder="任意の文字列" required />
+                  </label>
+                </div>
+                <button type="submit" class="btn btn--primary btn--small">ユーザー登録</button>
+                <p class="muted small">
+                  ※ 登録するとブラウザのローカルストレージにログイン情報が作成され、<br/>
+                  同時に <code>students</code> データにも追加されます（CSVダウンロードが必要です）。
+                </p>
+                <p id="registration-message" class="form-message" aria-live="polite"></p>
+              </form>
+            </section>
+          </section>
+
+          <!-- 設定 -->
+<section id="view-settings" class="view">
             <h2 class="view-title">設定</h2>
             <section class="section">
               <header class="section__header">
