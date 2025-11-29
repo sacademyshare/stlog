@@ -1,0 +1,4 @@
+student_id,grade,course_group,status
+S001,H1,高1文系,active
+S002,H1,高1理系,active
+S003,J2,中2標準,active
