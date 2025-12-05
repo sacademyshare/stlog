@@ -1,40 +1,24 @@
 // ===========================================================
 // 映像授業受講状況管理 Web アプリ
-//  - フロントエンドのみ (GitHub Pages想定)
-//  - データは GitHub 公開リポジトリの CSV を fetch
-//  - 擬似ログイン + localStorage による簡易認証
+//  - フロントエンド運用 (GitHub Pages + CSV)
+//  - 認証なし (Admin権限で動作)
 // ===========================================================
 (() => {
   'use strict';
 
   // ---------------------------------------------------------
-  // 定数・設定
+  // 設定
   // ---------------------------------------------------------
   const CONFIG = {
-    dataBasePath: '../data', // docs/index.html からの相対パス
+    // 運用環境に合わせて調整（通常は ./data または直下）
+    dataBasePath: './data', 
     files: {
       students: 'students.csv',
       courses: 'courses.csv',
       studentCourses: 'student_courses.csv',
       lessonLogs: 'lesson_logs.csv'
-    },
-    storageKeys: {
-      currentUser: 'lessonAppCurrentUser',
-      passwords: 'lessonAppPasswords'
     }
   };
-
-  const ROLES = {
-    ADMIN: 'admin',
-    TEACHER: 'teacher',
-    STUDENT: 'student'
-  };
-
-  const DEFAULT_ACCOUNTS = [
-    { id: 'admin',   password: 'admin123',   role: ROLES.ADMIN,   label: '管理者' },
-    { id: 'teacher1', password: 'teacher123', role: ROLES.TEACHER, label: '講師A' },
-    { id: 'S001',    password: 'student001', role: ROLES.STUDENT, label: '生徒 S001', studentId: 'S001' }
-  ];
 
   const state = {
     dataLoaded: false,
@@ -56,25 +40,11 @@
   // ---------------------------------------------------------
   // ユーティリティ
   // ---------------------------------------------------------
-  function $(selector) {
-    return document.querySelector(selector);
-  }
-
-  function $all(selector) {
-    return Array.from(document.querySelectorAll(selector));
-  }
-
-  function showElement(el) {
-    if (el) el.classList.remove('hidden');
-  }
-
-  function hideElement(el) {
-    if (el) el.classList.add('hidden');
-  }
-
-  function setText(el, text) {
-    if (el) el.textContent = text != null ? String(text) : '';
-  }
+  function $(selector) { return document.querySelector(selector); }
+  function $all(selector) { return Array.from(document.querySelectorAll(selector)); }
+  function showElement(el) { if (el) el.classList.remove('hidden'); }
+  function hideElement(el) { if (el) el.classList.add('hidden'); }
+  function setText(el, text) { if (el) el.textContent = text != null ? String(text) : ''; }
 
   function formatDateLabel(dateStr) {
     if (!dateStr) return '';
@@ -89,9 +59,11 @@
     return (value * 100).toFixed(0) + '%';
   }
 
+  // YYYY-MM-DD (or YYYY/MM/DD) -> Date Object
   function parseDate(dateStr) {
     if (!dateStr) return null;
-    const parts = String(dateStr).split('-').map(p => parseInt(p, 10));
+    const normalized = dateStr.replace(/\//g, '-');
+    const parts = normalized.split('-').map(p => parseInt(p, 10));
     if (parts.length !== 3 || parts.some(n => Number.isNaN(n))) return null;
     return new Date(parts[0], parts[1] - 1, parts[2]);
   }
@@ -103,17 +75,17 @@
     return `${y}-${m}-${day}`;
   }
 
-  function clampDateToRange(date, start, end) {
-    if (date < start) return new Date(start.getTime());
-    if (date > end) return new Date(end.getTime());
-    return date;
-  }
-
   function daysBetweenInclusive(start, end) {
     const msPerDay = 24 * 60 * 60 * 1000;
     const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
     return Math.floor((e - s) / msPerDay) + 1;
+  }
+
+  function clampDateToRange(date, start, end) {
+    if (date < start) return new Date(start.getTime());
+    if (date > end) return new Date(end.getTime());
+    return date;
   }
 
   function showGlobalMessage(message, type = 'info', timeoutMs = 4000) {
@@ -123,100 +95,13 @@
     el.textContent = message;
     showElement(el);
     if (timeoutMs > 0) {
-      window.clearTimeout(el._hideTimer);
-      el._hideTimer = window.setTimeout(() => hideElement(el), timeoutMs);
+      if (el._hideTimer) clearTimeout(el._hideTimer);
+      el._hideTimer = setTimeout(() => hideElement(el), timeoutMs);
     }
   }
 
   // ---------------------------------------------------------
-  // 認証管理
-  // ---------------------------------------------------------
-  const Auth = {
-    currentUser: null,
-
-    init() {
-      const savedStr = localStorage.getItem(CONFIG.storageKeys.currentUser);
-      if (savedStr) {
-        try {
-          const data = JSON.parse(savedStr);
-          if (data && data.id && data.role) {
-            this.currentUser = data;
-          }
-        } catch (e) {
-          console.warn('invalid currentUser in storage', e);
-        }
-      }
-      updateHeaderUserInfo();
-      applyRoleVisibility();
-    },
-
-    getAccounts() {
-      // 擬似ログイン用：パスワードだけをローカルで上書き可能
-      const customPwMap = this._getPasswordOverrides();
-      return DEFAULT_ACCOUNTS.map(acc => {
-        const override = customPwMap[acc.id];
-        return override
-          ? { ...acc, password: override }
-          : { ...acc };
-      });
-    },
-
-    login(loginId, password) {
-      const accounts = this.getAccounts();
-      const account = accounts.find(a => a.id === loginId);
-      if (!account) {
-        throw new Error('ID またはパスワードが正しくありません。');
-      }
-      if (account.password !== password) {
-        throw new Error('ID またはパスワードが正しくありません。');
-      }
-      this.currentUser = {
-        id: account.id,
-        role: account.role,
-        label: account.label,
-        studentId: account.studentId || null
-      };
-      localStorage.setItem(CONFIG.storageKeys.currentUser, JSON.stringify(this.currentUser));
-      updateHeaderUserInfo();
-      applyRoleVisibility();
-      return this.currentUser;
-    },
-
-    logout() {
-      this.currentUser = null;
-      localStorage.removeItem(CONFIG.storageKeys.currentUser);
-      updateHeaderUserInfo();
-      applyRoleVisibility();
-    },
-
-    _getPasswordOverrides() {
-      const str = localStorage.getItem(CONFIG.storageKeys.passwords);
-      if (!str) return {};
-      try {
-        const parsed = JSON.parse(str);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-      } catch {
-        return {};
-      }
-    },
-
-    changePassword(currentPassword, newPassword) {
-      if (!this.currentUser) throw new Error('ログイン情報が取得できません。');
-      const accounts = this.getAccounts();
-      const account = accounts.find(a => a.id === this.currentUser.id);
-      if (!account) throw new Error('アカウント情報が見つかりません。');
-
-      if (account.password !== currentPassword) {
-        throw new Error('現在のパスワードが一致しません。');
-      }
-      const map = this._getPasswordOverrides();
-      map[this.currentUser.id] = newPassword;
-      localStorage.setItem(CONFIG.storageKeys.passwords, JSON.stringify(map));
-    }
-  };
-
-  // ---------------------------------------------------------
-  // CSV 読み書き・データロード
+  // CSV データ管理
   // ---------------------------------------------------------
   const DataService = {
     headers: {
@@ -225,16 +110,11 @@
       studentCourses: ['student_id', 'course_id', 'planned_sessions', 'start_date', 'end_date'],
       lessonLogs: ['log_id', 'date', 'student_id', 'course_id', 'count', 'registered_by', 'created_at', 'kind']
     },
-    dirty: {
-      students: false,
-      courses: false,
-      studentCourses: false,
-      lessonLogs: false
-    },
+    dirty: { students: false, courses: false, studentCourses: false, lessonLogs: false },
 
     async loadAll() {
       state.isLoading = true;
-      setLoadingIndicator(true);
+      document.body.style.cursor = 'wait';
       try {
         const [studentsRes, coursesRes, studentCoursesRes, lessonLogsRes] = await Promise.all([
           this._loadCsv('students'),
@@ -244,33 +124,24 @@
         ]);
 
         state.students = studentsRes.rows;
-        this.headers.students = studentsRes.headers.length ? studentsRes.headers : this.headers.students;
-
         state.courses = coursesRes.rows;
-        this.headers.courses = coursesRes.headers.length ? coursesRes.headers : this.headers.courses;
-
         state.studentCourses = studentCoursesRes.rows;
-        this.headers.studentCourses = studentCoursesRes.headers.length ? studentCoursesRes.headers : this.headers.studentCourses;
-
         state.lessonLogs = lessonLogsRes.rows;
-        // kind カラムが無い場合は追加
-        const hasKind = lessonLogsRes.headers.includes('kind');
-        this.headers.lessonLogs = hasKind ? lessonLogsRes.headers : this.headers.lessonLogs;
-        if (!hasKind) {
-          state.lessonLogs.forEach(row => {
-            if (!('kind' in row)) row.kind = 'actual';
-          });
-        }
+        
+        // kind 列がない場合の補完
+        state.lessonLogs.forEach(row => {
+          if (!row.kind) row.kind = 'actual';
+        });
 
         state.dataLoaded = true;
         this.resetDirty();
-        showGlobalMessage('CSV データを読み込みました。', 'success', 3000);
+        showGlobalMessage('データを読み込みました。', 'success', 2000);
       } catch (e) {
         console.error(e);
-        showGlobalMessage('CSV 読み込み中にエラーが発生しました。GitHub 上のパスや CORS 設定を確認してください。', 'error', 8000);
+        showGlobalMessage('データ読み込みエラー。./data フォルダにCSVがあるか確認してください。', 'error', 8000);
       } finally {
         state.isLoading = false;
-        setLoadingIndicator(false);
+        document.body.style.cursor = 'default';
         refreshAllViews();
       }
     },
@@ -280,97 +151,39 @@
       const url = `${CONFIG.dataBasePath}/${fileName}?t=${Date.now()}`;
       try {
         const res = await fetch(url);
-        if (!res.ok) {
-          console.warn('CSV fetch failed:', url, res.status);
-          return { headers: this.headers[kind] || [], rows: [] };
-        }
+        if (!res.ok) return { rows: [] };
         const text = await res.text();
-        const { headers, rows } = this.parseCsv(text);
-        return { headers, rows };
+        return this.parseCsv(text);
       } catch (e) {
-        console.warn('CSV fetch error:', url, e);
-        return { headers: this.headers[kind] || [], rows: [] };
+        console.warn('Fetch error:', url, e);
+        return { rows: [] };
       }
     },
 
     parseCsv(text) {
-      const rows = [];
-      let current = '';
-      let row = [];
-      let inQuotes = false;
-
-      function endCell() {
-        row.push(current);
-        current = '';
-      }
-
-      function endRow() {
-        if (row.length > 0) {
-          rows.push(row);
-        }
-        row = [];
-      }
-
-      for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
-        const next = text[i + 1];
-
-        if (ch === '"') {
-          if (inQuotes && next === '"') {
-            current += '"';
-            i++;
-          } else {
-            inQuotes = !inQuotes;
-          }
-        } else if (ch === ',' && !inQuotes) {
-          endCell();
-        } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
-          if (ch === '\r' && next === '\n') {
-            i++;
-          }
-          endCell();
-          endRow();
-        } else {
-          current += ch;
-        }
-      }
-      if (current.length > 0 || row.length > 0) {
-        endCell();
-        endRow();
-      }
-
-      if (!rows.length) {
-        return { headers: [], rows: [] };
-      }
-      const headers = rows[0].map(h => h.trim());
-      const dataRows = rows.slice(1).filter(r => r.some(cell => cell && cell.trim() !== ''));
-      const objects = dataRows.map(r => {
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (lines.length < 2) return { rows: [] };
+      
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      const rows = lines.slice(1).map(line => {
+        // 簡易CSVパース（引用符内のカンマ等は考慮しない簡易版）
+        const cells = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
         const obj = {};
-        headers.forEach((h, idx) => {
-          obj[h] = r[idx] != null ? r[idx] : '';
+        headers.forEach((h, i) => {
+          obj[h] = cells[i] || '';
         });
         return obj;
       });
-      return { headers, rows: objects };
+      return { rows };
     },
 
     toCsv(headers, rows) {
-      const escapeCell = (value) => {
-        if (value == null) value = '';
-        let s = String(value);
-        if (s.includes('"')) {
-          s = s.replace(/"/g, '""');
-        }
-        if (/[",\n\r]/.test(s)) {
-          s = '"' + s + '"';
-        }
-        return s;
-      };
-
-      const lines = [];
-      lines.push(headers.map(escapeCell).join(','));
-      rows.forEach(row => {
-        const line = headers.map(h => escapeCell(row[h])).join(',');
+      const lines = [headers.join(',')];
+      rows.forEach(r => {
+        const line = headers.map(h => {
+          const val = String(r[h] || '').replace(/"/g, '""');
+          return /[",]/.test(val) ? `"${val}"` : val;
+        }).join(',');
         lines.push(line);
       });
       return lines.join('\n');
@@ -378,14 +191,7 @@
 
     downloadCsv(kind) {
       const headers = this.headers[kind];
-      const rows = state[kind === 'students' ? 'students'
-        : kind === 'courses' ? 'courses'
-        : kind === 'studentCourses' ? 'studentCourses'
-        : 'lessonLogs'];
-      if (!headers || !headers.length) {
-        showGlobalMessage(`${kind} のヘッダーが定義されていません。`, 'error');
-        return;
-      }
+      const rows = state[kind];
       const csv = this.toCsv(headers, rows);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -399,54 +205,36 @@
     },
 
     markDirty(kind) {
-      if (!this.dirty[kind]) {
-        this.dirty[kind] = true;
-        updateUnsavedIndicator();
-      }
-    },
-
-    resetDirty() {
-      Object.keys(this.dirty).forEach(k => { this.dirty[k] = false; });
+      this.dirty[kind] = true;
       updateUnsavedIndicator();
     },
-
+    resetDirty() {
+      Object.keys(this.dirty).forEach(k => this.dirty[k] = false);
+      updateUnsavedIndicator();
+    },
     hasDirty() {
       return Object.values(this.dirty).some(Boolean);
     }
   };
 
+  function updateUnsavedIndicator() {
+    if (DataService.hasDirty()) showElement(dom.unsavedIndicator);
+    else hideElement(dom.unsavedIndicator);
+  }
+
   // ---------------------------------------------------------
-  // 画面初期化
+  // 初期化 & イベント
   // ---------------------------------------------------------
   document.addEventListener('DOMContentLoaded', () => {
     cacheDom();
-    attachEventHandlers();
-    Auth.init();
-
-    if (Auth.currentUser) {
-      showMainView();
-      DataService.loadAll();
-    } else {
-      showLoginView();
-    }
+    attachEvents();
+    
+    // 即時データロード
+    DataService.loadAll();
   });
 
   function cacheDom() {
-    dom.loginView = $('#login-view');
-    dom.loginForm = $('#login-form');
-    dom.loginId = $('#login-id');
-    dom.loginPassword = $('#login-password');
-    dom.loginError = $('#login-error');
-
-    dom.mainView = $('#main-view');
     dom.navButtons = $all('.nav-btn');
-    dom.globalMessage = $('#global-message');
-    dom.unsavedIndicator = $('#unsaved-indicator');
-
-    dom.headerUserLabel = $('#header-user-label');
-    dom.headerUserRole = $('#header-user-role');
-    dom.logoutButton = $('#btn-logout');
-
     dom.views = {
       dashboard: $('#view-dashboard'),
       students: $('#view-students'),
@@ -455,1418 +243,661 @@
       analytics: $('#view-analytics'),
       settings: $('#view-settings')
     };
+    dom.globalMessage = $('#global-message');
+    dom.unsavedIndicator = $('#unsaved-indicator');
 
     // Dashboard
     dom.kpiActiveStudents = $('#kpi-active-students');
     dom.kpiMonthLogs = $('#kpi-month-logs');
     dom.kpiAvgAchievement = $('#kpi-avg-achievement');
-    dom.dashboardStudentSummaryBody = $('#dashboard-student-summary-body');
-    dom.dashboardStudentSummaryTitle = $('#dashboard-student-summary-title');
+    dom.dashboardSummaryBody = $('#dashboard-student-summary-body');
 
     // Students
+    dom.studentsTableBody = $('#students-table-body');
     dom.studentsFilterGrade = $('#students-filter-grade');
     dom.studentsFilterStatus = $('#students-filter-status');
     dom.studentsFilterId = $('#students-filter-id');
-    dom.studentsTableBody = $('#students-table-body');
-    dom.btnDownloadStudents = $('#btn-download-students');
 
-    // Student detail & calendar
-    dom.studentDetailInfo = $('#student-detail-info');
-    dom.studentDetailHint = $('#student-detail-hint');
+    // Detail
     dom.studentDetailSelect = $('#student-detail-select');
+    dom.studentDetailInfo = $('#student-detail-info');
     dom.studentCoursesBody = $('#student-courses-body');
-    dom.studentCourseAddCourse = $('#student-course-add-course');
-    dom.studentCourseAddPlanned = $('#student-course-add-planned');
-    dom.studentCourseAddStart = $('#student-course-add-start');
-    dom.studentCourseAddEnd = $('#student-course-add-end');
-    dom.btnStudentCourseAdd = $('#btn-student-course-add');
-    dom.btnDownloadStudentCourses = $('#btn-download-student-courses');
-
-    dom.btnCalPrev = $('#btn-cal-prev');
-    dom.btnCalNext = $('#btn-cal-next');
-    dom.calMonthLabel = $('#calendar-month-label');
     dom.calGrid = $('#calendar-grid');
-
-    dom.dayDetailTitle = $('#day-detail-title');
+    dom.calMonthLabel = $('#calendar-month-label');
     dom.dayDetailContent = $('#day-detail-content');
+    dom.dayDetailTitle = $('#day-detail-title');
     dom.dayDetailCourse = $('#day-detail-course');
-    dom.dayDetailCount = $('#day-detail-count');
-    dom.dayDetailKind = $('#day-detail-kind');
-    dom.btnDayDetailAdd = $('#btn-day-detail-add');
-    dom.btnDownloadLessonLogs = $('#btn-download-lesson-logs');
+    
+    // Inputs
+    dom.detailAddCourse = $('#student-course-add-course');
+    dom.detailAddPlanned = $('#student-course-add-planned');
+    dom.detailAddStart = $('#student-course-add-start');
+    dom.detailAddEnd = $('#student-course-add-end');
+    
+    // Day Log Inputs
+    dom.logAddCount = $('#day-detail-count');
+    dom.logAddKind = $('#day-detail-kind');
 
     // Courses
-    dom.coursesFilterGrade = $('#courses-filter-grade');
-    dom.coursesFilterQuery = $('#courses-filter-query');
     dom.coursesTableBody = $('#courses-table-body');
-    dom.btnDownloadCourses = $('#btn-download-courses');
     dom.courseAddId = $('#course-add-id');
     dom.courseAddName = $('#course-add-name');
     dom.courseAddGrade = $('#course-add-grade');
     dom.courseAddStandard = $('#course-add-standard');
     dom.courseAddNote = $('#course-add-note');
-    dom.btnCourseAdd = $('#btn-course-add');
 
     // Analytics
-    dom.analyticsDateStart = $('#analytics-date-start');
-    dom.analyticsDateEnd = $('#analytics-date-end');
-    dom.analyticsUnit = $('#analytics-unit');
-    dom.btnAnalyticsRecalc = $('#btn-analytics-recalc');
-    dom.analyticsStudentsBody = $('#analytics-students-body');
-    dom.analyticsCoursesBody = $('#analytics-courses-body');
-    dom.analyticsTimeline = $('#analytics-timeline');
-
-    // Settings
-    dom.settingsLoginId = $('#settings-login-id');
-    dom.settingsRole = $('#settings-role');
-    dom.passwordChangeForm = $('#password-change-form');
-    dom.currentPassword = $('#current-password');
-    dom.newPassword = $('#new-password');
-    dom.newPasswordConfirm = $('#new-password-confirm');
-    dom.passwordChangeMessage = $('#password-change-message');
-    dom.btnReloadData = $('#btn-reload-data');
-    dom.btnClearLocalStorage = $('#btn-clear-local-storage');
+    dom.anaStart = $('#analytics-date-start');
+    dom.anaEnd = $('#analytics-date-end');
+    dom.anaUnit = $('#analytics-unit');
+    dom.anaStudentsBody = $('#analytics-students-body');
+    dom.anaCoursesBody = $('#analytics-courses-body');
+    dom.anaTimeline = $('#analytics-timeline');
   }
 
-  function attachEventHandlers() {
-    if (dom.loginForm) {
-      dom.loginForm.addEventListener('submit', onLoginSubmit);
-    }
-    if (dom.logoutButton) {
-      dom.logoutButton.addEventListener('click', onLogoutClick);
-    }
-
+  function attachEvents() {
+    // Nav
     dom.navButtons.forEach(btn => {
       btn.addEventListener('click', () => {
-        navigateTo(btn.dataset.targetView);
+        const target = btn.dataset.targetView;
+        dom.navButtons.forEach(b => b.classList.toggle('active', b === btn));
+        Object.values(dom.views).forEach(v => hideElement(v));
+        showElement(dom.views[target]);
+        
+        if (target === 'analytics') setupAnalyticsDates();
+        if (target === 'studentDetail') refreshStudentDetailView();
+        
+        refreshAllViews();
       });
     });
 
     // Students
-    if (dom.studentsFilterGrade) {
-      dom.studentsFilterGrade.addEventListener('change', renderStudentsView);
-      dom.studentsFilterStatus.addEventListener('change', renderStudentsView);
-      dom.studentsFilterId.addEventListener('input', renderStudentsView);
-    }
-    if (dom.btnDownloadStudents) {
-      dom.btnDownloadStudents.addEventListener('click', () => DataService.downloadCsv('students'));
-    }
+    $('#students-filter-grade').addEventListener('change', renderStudentsView);
+    $('#students-filter-status').addEventListener('change', renderStudentsView);
+    $('#students-filter-id').addEventListener('input', renderStudentsView);
+    $('#btn-download-students').addEventListener('click', () => DataService.downloadCsv('students'));
 
-    // Student detail & calendar
-    if (dom.studentDetailSelect) {
-      dom.studentDetailSelect.addEventListener('change', () => {
-        state.currentStudentId = dom.studentDetailSelect.value || null;
-        refreshStudentDetailView();
-      });
-    }
-    if (dom.btnStudentCourseAdd) {
-      dom.btnStudentCourseAdd.addEventListener('click', onStudentCourseAdd);
-    }
-    if (dom.btnDownloadStudentCourses) {
-      dom.btnDownloadStudentCourses.addEventListener('click', () => DataService.downloadCsv('studentCourses'));
-    }
-
-    if (dom.btnCalPrev) {
-      dom.btnCalPrev.addEventListener('click', () => shiftCalendarMonth(-1));
-    }
-    if (dom.btnCalNext) {
-      dom.btnCalNext.addEventListener('click', () => shiftCalendarMonth(1));
-    }
-    if (dom.btnDayDetailAdd) {
-      dom.btnDayDetailAdd.addEventListener('click', onDayDetailAdd);
-    }
-    if (dom.btnDownloadLessonLogs) {
-      dom.btnDownloadLessonLogs.addEventListener('click', () => DataService.downloadCsv('lessonLogs'));
-    }
+    // Detail
+    dom.studentDetailSelect.addEventListener('change', (e) => {
+      state.currentStudentId = e.target.value;
+      refreshStudentDetailView();
+    });
+    $('#btn-student-course-add').addEventListener('click', onAddStudentCourse);
+    $('#btn-cal-prev').addEventListener('click', () => shiftMonth(-1));
+    $('#btn-cal-next').addEventListener('click', () => shiftMonth(1));
+    $('#btn-day-detail-add').addEventListener('click', onAddLog);
+    $('#btn-download-student-courses').addEventListener('click', () => DataService.downloadCsv('studentCourses'));
+    $('#btn-download-lesson-logs').addEventListener('click', () => DataService.downloadCsv('lessonLogs'));
 
     // Courses
-    if (dom.coursesFilterGrade) {
-      dom.coursesFilterGrade.addEventListener('change', renderCoursesView);
-      dom.coursesFilterQuery.addEventListener('input', renderCoursesView);
-    }
-    if (dom.btnDownloadCourses) {
-      dom.btnDownloadCourses.addEventListener('click', () => DataService.downloadCsv('courses'));
-    }
-    if (dom.btnCourseAdd) {
-      dom.btnCourseAdd.addEventListener('click', onCourseAdd);
-    }
+    $('#btn-download-courses').addEventListener('click', () => DataService.downloadCsv('courses'));
+    $('#btn-course-add').addEventListener('click', onAddCourse);
+    $('#courses-filter-grade').addEventListener('change', renderCoursesView);
+    $('#courses-filter-query').addEventListener('input', renderCoursesView);
 
     // Analytics
-    if (dom.btnAnalyticsRecalc) {
-      dom.btnAnalyticsRecalc.addEventListener('click', recalcAnalytics);
-    }
+    $('#btn-analytics-recalc').addEventListener('click', recalcAnalytics);
 
     // Settings
-    if (dom.passwordChangeForm) {
-      dom.passwordChangeForm.addEventListener('submit', onPasswordChangeSubmit);
-    }
-    if (dom.btnReloadData) {
-      dom.btnReloadData.addEventListener('click', () => DataService.loadAll());
-    }
-    if (dom.btnClearLocalStorage) {
-      dom.btnClearLocalStorage.addEventListener('click', () => {
-        if (!window.confirm('ローカル設定（ログイン状態・パスワード変更など）を初期化しますか？')) return;
-        localStorage.removeItem(CONFIG.storageKeys.currentUser);
-        localStorage.removeItem(CONFIG.storageKeys.passwords);
-        showGlobalMessage('ローカル設定を初期化しました。ページを再読み込みします。', 'success', 2500);
-        setTimeout(() => window.location.reload(), 800);
-      });
-    }
-  }
-
-  // ---------------------------------------------------------
-  // ログイン / ログアウト
-  // ---------------------------------------------------------
-  function onLoginSubmit(e) {
-    e.preventDefault();
-    const id = dom.loginId.value.trim();
-    const pw = dom.loginPassword.value;
-    dom.loginError.textContent = '';
-    try {
-      Auth.login(id, pw);
-      dom.loginPassword.value = '';
-      dom.loginId.value = '';
-      showMainView();
-      DataService.loadAll();
-    } catch (err) {
-      dom.loginError.textContent = err.message || 'ログインに失敗しました。';
-    }
-  }
-
-  function onLogoutClick() {
-    if (!window.confirm('ログアウトしますか？')) return;
-    Auth.logout();
-    state.dataLoaded = false;
-    showLoginView();
-  }
-
-  function showLoginView() {
-    showElement(dom.loginView);
-    hideElement(dom.mainView);
-  }
-
-  function showMainView() {
-    hideElement(dom.loginView);
-    showElement(dom.mainView);
-    navigateTo('dashboard');
-    refreshSettingsView();
-  }
-
-  function updateHeaderUserInfo() {
-    if (!dom.headerUserLabel || !dom.headerUserRole) return;
-    if (!Auth.currentUser) {
-      dom.headerUserLabel.textContent = '';
-      dom.headerUserRole.textContent = '';
-      return;
-    }
-    dom.headerUserLabel.textContent = Auth.currentUser.label || Auth.currentUser.id;
-    const roleLabel =
-      Auth.currentUser.role === ROLES.ADMIN ? '管理者' :
-      Auth.currentUser.role === ROLES.TEACHER ? '講師' :
-      '生徒';
-    dom.headerUserRole.textContent = roleLabel;
-  }
-
-  function applyRoleVisibility() {
-    const role = Auth.currentUser ? Auth.currentUser.role : null;
-    $all('[data-role-visible]').forEach(el => {
-      const rolesStr = el.getAttribute('data-role-visible') || '';
-      const roles = rolesStr.split(',').map(r => r.trim()).filter(Boolean);
-      if (!roles.length) return;
-      if (!role || !roles.includes(role)) {
-        el.classList.add('hidden');
-      } else {
-        el.classList.remove('hidden');
-      }
+    $('#btn-reload-data').addEventListener('click', () => DataService.loadAll());
+    $('#btn-clear-local-storage').addEventListener('click', () => {
+      localStorage.clear();
+      location.reload();
     });
-  }
-
-  // ---------------------------------------------------------
-  // ナビゲーション
-  // ---------------------------------------------------------
-  function navigateTo(viewKey) {
-    if (!dom.views[viewKey]) return;
-    dom.navButtons.forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.targetView === viewKey);
-    });
-    Object.entries(dom.views).forEach(([key, el]) => {
-      if (!el) return;
-      if (key === viewKey) showElement(el);
-      else hideElement(el);
-    });
-
-    // 各ビューの描画
-    switch (viewKey) {
-      case 'dashboard':
-        renderDashboardView();
-        break;
-      case 'students':
-        renderStudentsView();
-        break;
-      case 'studentDetail':
-        renderStudentDetailView();
-        break;
-      case 'courses':
-        renderCoursesView();
-        break;
-      case 'analytics':
-        setupAnalyticsDefaultsIfNeeded();
-        recalcAnalytics();
-        break;
-      case 'settings':
-        refreshSettingsView();
-        break;
-    }
   }
 
   function refreshAllViews() {
-    renderDashboardView();
+    if (!state.dataLoaded) return;
+    renderDashboard();
     renderStudentsView();
-    renderStudentDetailView();
+    renderStudentDetailView(); // ここで自動選択ロジックが走る
     renderCoursesView();
-    setupAnalyticsDefaultsIfNeeded();
-    recalcAnalytics();
-    refreshSettingsView();
-  }
-
-  // ---------------------------------------------------------
-  // ローディングインジケータ
-  // ---------------------------------------------------------
-  function setLoadingIndicator(isLoading) {
-    state.isLoading = isLoading;
-    document.body.style.cursor = isLoading ? 'progress' : 'default';
-  }
-
-  function updateUnsavedIndicator() {
-    if (DataService.hasDirty()) {
-      showElement(dom.unsavedIndicator);
-    } else {
-      hideElement(dom.unsavedIndicator);
-    }
   }
 
   // ---------------------------------------------------------
   // Dashboard
   // ---------------------------------------------------------
-  function renderDashboardView() {
-    if (!state.dataLoaded || !Auth.currentUser) return;
+  function renderDashboard() {
+    const active = state.students.filter(s => s.status === 'active').length;
+    setText(dom.kpiActiveStudents, active);
 
-    // KPI: active students
-    const activeStudents = state.students.filter(s => String(s.status).toLowerCase() === 'active');
-    setText(dom.kpiActiveStudents, activeStudents.length);
-
-    // KPI: this month logs (actual)
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const monthLogs = state.lessonLogs.filter(log => {
-      const dt = parseDate(log.date);
-      if (!dt) return false;
-      if (isPlannedLog(log)) return false;
-      return dt >= monthStart && dt <= monthEnd;
-    });
-    const monthCount = monthLogs.reduce((sum, log) => sum + (parseFloat(log.count) || 0), 0);
-    setText(dom.kpiMonthLogs, monthCount);
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthLogs = state.lessonLogs.filter(l => l.date.startsWith(monthPrefix) && l.kind !== 'planned');
+    const totalCount = monthLogs.reduce((acc, cur) => acc + (parseFloat(cur.count)||0), 0);
+    setText(dom.kpiMonthLogs, totalCount);
 
-    // KPI: avg achievement
-    const perStudent = computeStudentAchievement(null, null);
-    if (!perStudent.length) {
-      setText(dom.kpiAvgAchievement, '-');
-    } else {
-      const ratios = perStudent
-        .filter(r => r.planned > 0)
-        .map(r => r.actual / r.planned);
-      const avg =
-        ratios.length > 0
-          ? ratios.reduce((a, b) => a + b, 0) / ratios.length
-          : 0;
-      setText(dom.kpiAvgAchievement, formatPercent(avg));
-    }
+    const achievements = computeAchievements();
+    const avg = achievements.reduce((acc, c) => acc + c.rate, 0) / (achievements.length || 1);
+    setText(dom.kpiAvgAchievement, formatPercent(avg));
 
-    // Student summary table
-    let summaryRows = perStudent;
-    const role = Auth.currentUser.role;
-    if (role === ROLES.STUDENT && Auth.currentUser.studentId) {
-      summaryRows = perStudent.filter(r => r.student.student_id === Auth.currentUser.studentId);
-      setText(dom.dashboardStudentSummaryTitle, 'あなたの進捗');
-    } else {
-      setText(dom.dashboardStudentSummaryTitle, '生徒別進捗サマリ（期間指定なしの全体）');
-    }
-
-    const tbody = dom.dashboardStudentSummaryBody;
+    // Table
+    const tbody = dom.dashboardSummaryBody;
     tbody.innerHTML = '';
-    if (!summaryRows.length) {
+    achievements.forEach(row => {
       const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 6;
-      td.textContent = '表示できるデータがありません。';
-      td.className = 'text-muted';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-
-    summaryRows.forEach(r => {
-      const tr = document.createElement('tr');
-      const s = r.student;
       tr.innerHTML = `
-        <td>${s.student_id}</td>
-        <td>${s.grade || ''}</td>
-        <td>${s.course_group || ''}</td>
-        <td>${r.planned.toFixed(1)}</td>
-        <td>${r.actual.toFixed(1)}</td>
-        <td>${formatPercent(r.planned > 0 ? r.actual / r.planned : NaN)}</td>
+        <td>${row.id}</td>
+        <td>${row.grade}</td>
+        <td>${row.group}</td>
+        <td>${row.planned.toFixed(1)}</td>
+        <td>${row.actual.toFixed(1)}</td>
+        <td>${formatPercent(row.rate)}</td>
       `;
       tbody.appendChild(tr);
     });
   }
 
+  function computeAchievements(start, end) {
+    return state.students.map(s => {
+      const scList = state.studentCourses.filter(sc => sc.student_id === s.student_id);
+      let planned = 0;
+      // 単純化: 期間指定がある場合は按分計算
+      scList.forEach(sc => {
+        let p = parseFloat(sc.planned_sessions)||0;
+        if (start && end && sc.start_date && sc.end_date) {
+          const cs = parseDate(sc.start_date);
+          const ce = parseDate(sc.end_date);
+          const totalDays = daysBetweenInclusive(cs, ce);
+          const is = clampDateToRange(start, cs, ce);
+          const ie = clampDateToRange(end, cs, ce);
+          const interDays = daysBetweenInclusive(is, ie);
+          if (totalDays > 0 && interDays > 0) {
+            p = p * (interDays / totalDays);
+          } else if (ce < start || cs > end) {
+            p = 0;
+          }
+        }
+        planned += p;
+      });
+
+      const logs = state.lessonLogs.filter(l => {
+        if (l.student_id !== s.student_id) return false;
+        if (l.kind === 'planned') return false;
+        if (start || end) {
+          const d = parseDate(l.date);
+          if (start && d < start) return false;
+          if (end && d > end) return false;
+        }
+        return true;
+      });
+      const actual = logs.reduce((acc, l) => acc + (parseFloat(l.count)||0), 0);
+      return {
+        id: s.student_id,
+        grade: s.grade,
+        group: s.course_group,
+        planned,
+        actual,
+        rate: planned ? actual / planned : 0
+      };
+    });
+  }
+
   // ---------------------------------------------------------
-  // 生徒一覧
+  // Students
   // ---------------------------------------------------------
   function renderStudentsView() {
-    if (!state.dataLoaded) return;
     const tbody = dom.studentsTableBody;
     tbody.innerHTML = '';
-
-    // フィルタ項目の初期化（初回のみ）
-    const grades = Array.from(new Set(state.students.map(s => s.grade).filter(Boolean)));
-    if (dom.studentsFilterGrade && dom.studentsFilterGrade.options.length <= 1) {
-      grades.sort().forEach(g => {
+    
+    // Filter Build
+    const gradeSelect = dom.studentsFilterGrade;
+    const grades = [...new Set(state.students.map(s => s.grade).filter(Boolean))].sort();
+    if (gradeSelect.options.length === 1) {
+      grades.forEach(g => {
         const opt = document.createElement('option');
-        opt.value = g;
-        opt.textContent = g;
-        dom.studentsFilterGrade.appendChild(opt);
+        opt.value = g; opt.textContent = g;
+        gradeSelect.appendChild(opt);
       });
     }
 
-    const filterGrade = dom.studentsFilterGrade.value;
-    const filterStatus = dom.studentsFilterStatus.value;
-    const filterId = dom.studentsFilterId.value.trim().toLowerCase();
+    const fGrade = gradeSelect.value;
+    const fStatus = dom.studentsFilterStatus.value;
+    const fId = dom.studentsFilterId.value.toLowerCase();
 
-    let students = state.students.slice();
-    if (filterGrade) {
-      students = students.filter(s => String(s.grade) === filterGrade);
-    }
-    if (filterStatus) {
-      students = students.filter(s => String(s.status).toLowerCase() === filterStatus);
-    }
-    if (filterId) {
-      students = students.filter(s => String(s.student_id).toLowerCase().includes(filterId));
-    }
-
-    students.sort((a, b) => {
-      if (a.grade === b.grade) return String(a.student_id).localeCompare(b.student_id);
-      return String(a.grade).localeCompare(b.grade);
-    });
-
-    if (!students.length) {
+    state.students.filter(s => {
+      if (fGrade && s.grade !== fGrade) return false;
+      if (fStatus && s.status !== fStatus) return false;
+      if (fId && !s.student_id.toLowerCase().includes(fId)) return false;
+      return true;
+    }).forEach(s => {
       const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 5;
-      td.textContent = '該当する生徒がいません。';
-      td.className = 'text-muted';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-
-    students.forEach(s => {
-      const tr = document.createElement('tr');
-      const statusLabel = String(s.status || '').toLowerCase();
       tr.innerHTML = `
         <td>${s.student_id}</td>
-        <td>${s.grade || ''}</td>
-        <td>${s.course_group || ''}</td>
-        <td>${statusLabel}</td>
-        <td></td>
+        <td>${s.grade}</td>
+        <td>${s.course_group}</td>
+        <td>${s.status}</td>
+        <td><button class="btn small-btn">選択</button></td>
       `;
-      const actionTd = tr.lastElementChild;
-      const btn = document.createElement('button');
-      btn.className = 'btn small-btn';
-      btn.textContent = '詳細';
-      btn.addEventListener('click', () => {
+      tr.querySelector('button').addEventListener('click', () => {
         state.currentStudentId = s.student_id;
-        dom.studentDetailSelect.value = s.student_id;
-        navigateTo('studentDetail');
+        dom.navButtons.forEach(b => b.classList.remove('active'));
+        $all('[data-target-view="student-detail"]').forEach(b => b.classList.add('active'));
+        hideElement(dom.views.students);
+        showElement(dom.views.studentDetail);
         refreshStudentDetailView();
       });
-      actionTd.appendChild(btn);
       tbody.appendChild(tr);
     });
   }
 
   // ---------------------------------------------------------
-  // 生徒詳細 & カレンダー
+  // Student Detail
   // ---------------------------------------------------------
-  function renderStudentDetailView() {
-    if (!state.dataLoaded || !Auth.currentUser) return;
-
-    // 生徒セレクトの構築（初回 or データ更新時）
-    if (dom.studentDetailSelect && !dom.studentDetailSelect._initialized) {
-      dom.studentDetailSelect.innerHTML = '<option value="">生徒を選択</option>';
+  function refreshStudentDetailView() {
+    // 1. 生徒セレクトボックスの構築
+    const select = dom.studentDetailSelect;
+    if (select.options.length === 0) {
       state.students.forEach(s => {
         const opt = document.createElement('option');
         opt.value = s.student_id;
-        opt.textContent = `${s.student_id} (${s.grade || ''} / ${s.course_group || ''})`;
-        dom.studentDetailSelect.appendChild(opt);
+        opt.textContent = `${s.student_id} : ${s.grade || ''}`;
+        select.appendChild(opt);
       });
-      dom.studentDetailSelect._initialized = true;
     }
 
-    // ロールに応じて初期選択
-    if (!state.currentStudentId && Auth.currentUser.role === ROLES.STUDENT && Auth.currentUser.studentId) {
-      state.currentStudentId = Auth.currentUser.studentId;
+    // 2. 自動選択ロジック（未選択なら先頭を選ぶ）
+    if (!state.currentStudentId && state.students.length > 0) {
+      state.currentStudentId = state.students[0].student_id;
+    }
+    select.value = state.currentStudentId || '';
+
+    // 3. 表示更新
+    const sId = state.currentStudentId;
+    if (!sId) return;
+
+    const student = state.students.find(s => s.student_id === sId);
+    if (student) {
+      setText(dom.studentDetailInfo, `${student.course_group} / ${student.status}`);
     }
 
-    if (state.currentStudentId) {
-      dom.studentDetailSelect.value = state.currentStudentId;
-    }
-
-    refreshStudentDetailView();
-  }
-
-  function refreshStudentDetailView() {
-    const studentId = state.currentStudentId;
-    if (!studentId) {
-      setText(dom.studentDetailInfo, '');
-      setText(dom.studentDetailHint, '生徒を選択してください。');
-      dom.studentCoursesBody.innerHTML = '<tr><td colspan="6" class="text-muted">生徒を選択してください。</td></tr>';
-      dom.dayDetailTitle.textContent = '日付をクリックすると詳細が表示されます。';
-      dom.dayDetailContent.innerHTML = '<p class="text-muted">まだ日付が選択されていません。</p>';
-      dom.calGrid.innerHTML = '';
-      return;
-    }
-
-    const s = state.students.find(st => st.student_id === studentId);
-    if (!s) {
-      setText(dom.studentDetailInfo, '');
-      setText(dom.studentDetailHint, '指定された生徒IDが見つかりません。');
-      return;
-    }
-
-    setText(dom.studentDetailInfo, `生徒ID: ${s.student_id} / 学年: ${s.grade || '-'} / コース群: ${s.course_group || '-'}`);
-    setText(dom.studentDetailHint, 'student_courses.csv の情報を元に予定講数・期間を表示します。');
-
-    // 講座セレクト（追加用）
-    dom.studentCourseAddCourse.innerHTML = '';
+    // 講座リスト構築（追加用セレクトも更新）
+    dom.detailAddCourse.innerHTML = '';
     state.courses.forEach(c => {
       const opt = document.createElement('option');
       opt.value = c.course_id;
-      opt.textContent = `${c.course_id} (${c.course_name || ''})`;
-      dom.studentCourseAddCourse.appendChild(opt);
+      opt.textContent = `${c.course_name} (${c.course_id})`;
+      dom.detailAddCourse.appendChild(opt);
     });
 
-    // 日詳細の講座セレクト
-    dom.dayDetailCourse.innerHTML = '';
-    const scList = state.studentCourses.filter(sc => sc.student_id === studentId);
-    scList.forEach(sc => {
-      const course = state.courses.find(c => c.course_id === sc.course_id);
-      const label = course
-        ? `${course.course_id} (${course.course_name || ''})`
-        : sc.course_id;
-      const opt = document.createElement('option');
-      opt.value = sc.course_id;
-      opt.textContent = label;
-      dom.dayDetailCourse.appendChild(opt);
-    });
-    // 関連講座がなければ全講座を候補に
-    if (!scList.length) {
-      state.courses.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c.course_id;
-        opt.textContent = `${c.course_id} (${c.course_name || ''})`;
-        dom.dayDetailCourse.appendChild(opt);
-      });
+    renderStudentCourses(sId);
+    
+    // カレンダー
+    if (!state.calendar.year) {
+      const now = new Date();
+      state.calendar.year = now.getFullYear();
+      state.calendar.month = now.getMonth();
     }
-
-    renderStudentCoursesTable(studentId);
-    initCalendarIfNeeded();
-    renderCalendar(studentId);
-    renderDayDetail(null); // 選択解除
+    renderCalendar(sId);
+    renderDayDetail(state.calendar.selectedDateStr); // 保持していた選択日を再描画
   }
 
-  function renderStudentCoursesTable(studentId) {
+  function renderStudentCourses(sId) {
     const tbody = dom.studentCoursesBody;
     tbody.innerHTML = '';
+    const myCourses = state.studentCourses.filter(sc => sc.student_id === sId);
+    
+    // DayDetail用の講座セレクトも更新
+    dom.dayDetailCourse.innerHTML = '';
 
-    const scList = state.studentCourses.filter(sc => sc.student_id === studentId);
-    if (!scList.length) {
-      const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 6;
-      td.textContent = '紐づいている講座がありません。';
-      td.className = 'text-muted';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-
-    const role = Auth.currentUser.role;
-    const editable = role === ROLES.ADMIN;
-
-    scList.forEach(sc => {
-      const course = state.courses.find(c => c.course_id === sc.course_id);
-      const logs = state.lessonLogs.filter(log => log.student_id === studentId && log.course_id === sc.course_id && !isPlannedLog(log));
-      const actualCount = logs.reduce((sum, l) => sum + (parseFloat(l.count) || 0), 0);
-      const planned = parseFloat(sc.planned_sessions || '0') || 0;
-      const rate = planned > 0 ? actualCount / planned : NaN;
+    myCourses.forEach(sc => {
+      const c = state.courses.find(cx => cx.course_id === sc.course_id) || {};
+      const actual = state.lessonLogs
+        .filter(l => l.student_id === sId && l.course_id === sc.course_id && l.kind !== 'planned')
+        .reduce((sum, l) => sum + (parseFloat(l.count)||0), 0);
+      const planned = parseFloat(sc.planned_sessions)||0;
+      const rate = planned ? actual / planned : 0;
 
       const tr = document.createElement('tr');
-      const periodText = `${sc.start_date || '-'} 〜 ${sc.end_date || '-'}`;
-      const courseName = course ? course.course_name || '' : '';
       tr.innerHTML = `
         <td>${sc.course_id}</td>
-        <td>${courseName}</td>
-        <td></td>
-        <td>${actualCount}</td>
+        <td>${c.course_name || ''}</td>
+        <td><input type="number" value="${planned}" style="width:60px"></td>
+        <td>${actual}</td>
         <td>${formatPercent(rate)}</td>
-        <td>${periodText}</td>
+        <td>${sc.start_date}<br>${sc.end_date}</td>
       `;
-      const plannedTd = tr.children[2];
-      if (editable) {
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.min = '0';
-        input.step = '1';
-        input.value = sc.planned_sessions || '';
-        input.style.width = '80px';
-        input.addEventListener('change', () => {
-          sc.planned_sessions = input.value;
-          DataService.markDirty('studentCourses');
-          renderDashboardView();
-          recalcAnalytics();
-        });
-        plannedTd.appendChild(input);
-      } else {
-        plannedTd.textContent = planned ? String(planned) : '-';
-      }
-
+      // 計画数変更
+      tr.querySelector('input').addEventListener('change', (e) => {
+        sc.planned_sessions = e.target.value;
+        DataService.markDirty('studentCourses');
+        renderDashboard(); // KPI更新
+      });
       tbody.appendChild(tr);
+
+      // セレクトに追加
+      const opt = document.createElement('option');
+      opt.value = sc.course_id;
+      opt.textContent = c.course_name || sc.course_id;
+      dom.dayDetailCourse.appendChild(opt);
     });
+
+    // コース未登録でもログ入力できるように、全コースをセレクトに入れるか？
+    // -> 現状は紐づけ済みコースのみ表示する形とする。空なら「紐づけなし」
+    if (myCourses.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = "(講座が紐づいていません)";
+      dom.dayDetailCourse.appendChild(opt);
+    }
   }
 
-  function onStudentCourseAdd() {
-    const studentId = state.currentStudentId;
-    if (!studentId) {
-      showGlobalMessage('先に生徒を選択してください。', 'error');
+  function onAddStudentCourse() {
+    const sId = state.currentStudentId;
+    if (!sId) return;
+    const cId = dom.detailAddCourse.value;
+    if (state.studentCourses.some(sc => sc.student_id === sId && sc.course_id === cId)) {
+      alert('既に登録されています');
       return;
     }
-    const courseId = dom.studentCourseAddCourse.value;
-    const planned = dom.studentCourseAddPlanned.value;
-    const start = dom.studentCourseAddStart.value;
-    const end = dom.studentCourseAddEnd.value;
-
-    if (!courseId) {
-      showGlobalMessage('講座を選択してください。', 'error');
-      return;
-    }
-    const existing = state.studentCourses.find(sc => sc.student_id === studentId && sc.course_id === courseId);
-    if (existing) {
-      showGlobalMessage('すでにこの生徒に紐づいている講座です。', 'error');
-      return;
-    }
-
-    const row = {
-      student_id: studentId,
-      course_id: courseId,
-      planned_sessions: planned || '0',
-      start_date: start || '',
-      end_date: end || ''
-    };
-    state.studentCourses.push(row);
+    state.studentCourses.push({
+      student_id: sId,
+      course_id: cId,
+      planned_sessions: dom.detailAddPlanned.value,
+      start_date: dom.detailAddStart.value,
+      end_date: dom.detailAddEnd.value
+    });
     DataService.markDirty('studentCourses');
-    renderStudentCoursesTable(studentId);
     refreshStudentDetailView();
-    showGlobalMessage('講座を追加しました。student_courses.csv をダウンロードして GitHub に反映してください。', 'success');
   }
 
   // ---------------------------------------------------------
-  // カレンダー
+  // Calendar Logic
   // ---------------------------------------------------------
-  function initCalendarIfNeeded() {
-    if (state.calendar.year != null) return;
-    const today = new Date();
-    state.calendar.year = today.getFullYear();
-    state.calendar.month = today.getMonth();
-    state.calendar.selectedDateStr = null;
-  }
-
-  function shiftCalendarMonth(delta) {
-    if (state.calendar.year == null) initCalendarIfNeeded();
-    let year = state.calendar.year;
-    let month = state.calendar.month + delta;
-    if (month < 0) {
-      month = 11;
-      year--;
-    } else if (month > 11) {
-      month = 0;
-      year++;
+  function shiftMonth(delta) {
+    state.calendar.month += delta;
+    if (state.calendar.month > 11) {
+      state.calendar.month = 0;
+      state.calendar.year++;
+    } else if (state.calendar.month < 0) {
+      state.calendar.month = 11;
+      state.calendar.year--;
     }
-    state.calendar.year = year;
-    state.calendar.month = month;
     renderCalendar(state.currentStudentId);
   }
 
-  function renderCalendar(studentId) {
-    if (!studentId) {
-      dom.calMonthLabel.textContent = '';
-      dom.calGrid.innerHTML = '';
-      return;
-    }
-
-    const year = state.calendar.year;
-    const month = state.calendar.month;
-    const monthLabel = `${year}年${month + 1}月`;
-    dom.calMonthLabel.textContent = monthLabel;
-
-    const firstDay = new Date(year, month, 1);
-    const firstWeekday = firstDay.getDay(); // 0=Sun
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-    const dailyMap = computeDailyCounts(studentId, year, month);
-    const todayStr = dateToStr(new Date());
-
+  function renderCalendar(sId) {
+    const y = state.calendar.year;
+    const m = state.calendar.month;
+    dom.calMonthLabel.textContent = `${y}年 ${m+1}月`;
     dom.calGrid.innerHTML = '';
-    const totalCells = 42; // 7 x 6
-    for (let cellIndex = 0; cellIndex < totalCells; cellIndex++) {
-      const cell = document.createElement('button');
-      cell.type = 'button';
+
+    const firstDay = new Date(y, m, 1);
+    const lastDay = new Date(y, m+1, 0);
+    const startOffset = firstDay.getDay(); // 0:Sun
+    const totalDays = lastDay.getDate();
+
+    // 日別データの集計
+    const dailyData = {};
+    state.lessonLogs.forEach(l => {
+      if (l.student_id !== sId) return;
+      const d = parseDate(l.date);
+      if (!d || d.getFullYear() !== y || d.getMonth() !== m) return;
+      const day = d.getDate();
+      if (!dailyData[day]) dailyData[day] = { p: 0, a: 0 };
+      if (l.kind === 'planned') dailyData[day].p += parseFloat(l.count)||0;
+      else dailyData[day].a += parseFloat(l.count)||0;
+    });
+
+    // 42セル (6週間分)
+    for (let i = 0; i < 42; i++) {
+      const dayNum = i - startOffset + 1;
+      const cell = document.createElement('div');
       cell.className = 'calendar-cell';
 
-      const dayNumber = cellIndex - firstWeekday + 1;
-      const isCurrentMonthDay = dayNumber >= 1 && dayNumber <= daysInMonth;
+      if (dayNum > 0 && dayNum <= totalDays) {
+        const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
+        
+        cell.innerHTML = `<div class="calendar-day-number">${dayNum}</div>`;
+        
+        // カウント表示
+        const dat = dailyData[dayNum];
+        if (dat) {
+          const countsDiv = document.createElement('div');
+          countsDiv.className = 'calendar-day-counts';
+          countsDiv.textContent = `${dat.a} / ${dat.p}`;
+          cell.appendChild(countsDiv);
 
-      if (!isCurrentMonthDay) {
-        cell.classList.add('disabled');
-        dom.calGrid.appendChild(cell);
-        continue;
-      }
-
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
-      const info = dailyMap[dateStr] || { planned: 0, actual: 0 };
-
-      if (dateStr === todayStr) {
-        cell.classList.add('calendar-cell-today');
-      }
-      if (state.calendar.selectedDateStr === dateStr) {
-        cell.classList.add('calendar-cell-selected');
-      }
-
-      const dayNumEl = document.createElement('div');
-      dayNumEl.className = 'calendar-day-number';
-      dayNumEl.textContent = dayNumber;
-      cell.appendChild(dayNumEl);
-
-      const countsEl = document.createElement('div');
-      countsEl.className = 'calendar-day-counts';
-      if (info.actual > 0 || info.planned > 0) {
-        const aSpan = document.createElement('span');
-        aSpan.textContent = info.actual.toFixed(1).replace(/\.0$/, '') || '0';
-        const sepSpan = document.createElement('span');
-        sepSpan.textContent = ' / ';
-        const pSpan = document.createElement('span');
-        pSpan.textContent = info.planned.toFixed(1).replace(/\.0$/, '') || '0';
-        countsEl.appendChild(aSpan);
-        countsEl.appendChild(sepSpan);
-        countsEl.appendChild(pSpan);
-      } else {
-        countsEl.innerHTML = '&nbsp;';
-      }
-      cell.appendChild(countsEl);
-
-      const total = info.actual + info.planned;
-      if (total > 0) {
-        const badge = document.createElement('div');
-        badge.className = 'calendar-day-badge';
-        if (info.actual >= info.planned) {
-          badge.classList.add('actual-dominant');
-          badge.textContent = '◎ 実績';
-        } else {
-          badge.classList.add('planned-dominant');
-          badge.textContent = '△ 予定';
+          // バッジ
+          const total = dat.a + dat.p;
+          if (total > 0) {
+            const badge = document.createElement('div');
+            badge.className = 'calendar-day-badge ' + (dat.a >= dat.p ? 'actual-dominant' : 'planned-dominant');
+            badge.textContent = dat.a >= dat.p ? '実績' : '予定';
+            cell.appendChild(badge);
+          }
         }
-        cell.appendChild(badge);
+
+        // 選択状態
+        if (state.calendar.selectedDateStr === dateStr) {
+          cell.classList.add('calendar-cell-selected');
+        }
+
+        // クリックイベント
+        cell.addEventListener('click', () => {
+          state.calendar.selectedDateStr = dateStr;
+          renderCalendar(sId); // 再描画して選択枠を更新
+          renderDayDetail(dateStr);
+        });
+      } else {
+        cell.classList.add('disabled');
       }
-
-      cell.addEventListener('click', () => {
-        state.calendar.selectedDateStr = dateStr;
-        renderCalendar(studentId);
-        renderDayDetail(dateStr);
-      });
-
       dom.calGrid.appendChild(cell);
     }
   }
 
-  function computeDailyCounts(studentId, year, month) {
-    const map = {};
-    state.lessonLogs.forEach(log => {
-      if (log.student_id !== studentId) return;
-      const dt = parseDate(log.date);
-      if (!dt) return;
-      if (dt.getFullYear() !== year || dt.getMonth() !== month) return;
-
-      const dateStr = dateToStr(dt);
-      if (!map[dateStr]) {
-        map[dateStr] = { planned: 0, actual: 0 };
-      }
-      const count = parseFloat(log.count) || 0;
-      if (isPlannedLog(log)) {
-        map[dateStr].planned += count;
-      } else {
-        map[dateStr].actual += count;
-      }
-    });
-    return map;
-  }
-
-  function isPlannedLog(log) {
-    const kind = (log.kind || '').toLowerCase();
-    if (kind === 'planned') return true;
-    const reg = (log.registered_by || '').toLowerCase();
-    if (reg === 'plan' || reg === 'planned') return true;
-    return false;
-  }
-
   function renderDayDetail(dateStr) {
-    const studentId = state.currentStudentId;
-    if (!studentId) return;
     if (!dateStr) {
-      state.calendar.selectedDateStr = null;
-      dom.dayDetailTitle.textContent = '日付をクリックすると詳細が表示されます。';
-      dom.dayDetailContent.innerHTML = '<p class="text-muted">まだ日付が選択されていません。</p>';
+      dom.dayDetailTitle.textContent = "日付を選択してください";
+      dom.dayDetailContent.innerHTML = '<p class="text-muted">カレンダーの日付をクリックしてください。</p>';
       return;
     }
-
     dom.dayDetailTitle.textContent = formatDateLabel(dateStr);
-
-    const logs = state.lessonLogs
-      .filter(log => log.student_id === studentId && log.date === dateStr)
-      .sort((a, b) => (a.log_id || '').localeCompare(b.log_id || ''));
-
-    const container = document.createElement('div');
-
-    if (!logs.length) {
-      const p = document.createElement('p');
-      p.textContent = 'この日には登録された予定・実績がありません。';
-      p.className = 'text-muted';
-      container.appendChild(p);
-    } else {
-      const tableWrapper = document.createElement('div');
-      tableWrapper.className = 'table-wrapper';
-      const table = document.createElement('table');
-      const thead = document.createElement('thead');
-      thead.innerHTML = `
-        <tr>
-          <th>種別</th>
-          <th>講座</th>
-          <th>コマ数</th>
-          <th>登録者</th>
-          <th>登録日時</th>
-          <th></th>
-        </tr>
-      `;
-      const tbody = document.createElement('tbody');
-
-      logs.forEach(log => {
-        const tr = document.createElement('tr');
-        const course = state.courses.find(c => c.course_id === log.course_id);
-        const label = course
-          ? `${course.course_id} (${course.course_name || ''})`
-          : log.course_id;
-
-        const kindLabel = isPlannedLog(log) ? '予定' : '実績';
-        tr.innerHTML = `
-          <td>${kindLabel}</td>
-          <td>${label}</td>
-          <td>${log.count}</td>
-          <td>${log.registered_by || ''}</td>
-          <td>${log.created_at || ''}</td>
-          <td></td>
-        `;
-        const actionTd = tr.lastElementChild;
-        const role = Auth.currentUser.role;
-        const canDelete = role === ROLES.ADMIN || role === ROLES.TEACHER || (role === ROLES.STUDENT && log.registered_by === Auth.currentUser.id);
-        if (canDelete) {
-          const btn = document.createElement('button');
-          btn.className = 'btn small-btn';
-          btn.textContent = '削除';
-          btn.addEventListener('click', () => {
-            if (!window.confirm('このログを削除しますか？')) return;
-            const idx = state.lessonLogs.findIndex(l => l.log_id === log.log_id);
-            if (idx >= 0) {
-              state.lessonLogs.splice(idx, 1);
-              DataService.markDirty('lessonLogs');
-              renderCalendar(studentId);
-              renderDayDetail(dateStr);
-              renderStudentCoursesTable(studentId);
-              renderDashboardView();
-              recalcAnalytics();
-            }
-          });
-          actionTd.appendChild(btn);
-        }
-        tbody.appendChild(tr);
-      });
-
-      table.appendChild(thead);
-      table.appendChild(tbody);
-      tableWrapper.appendChild(table);
-      container.appendChild(tableWrapper);
-    }
-
+    
+    const sId = state.currentStudentId;
+    const logs = state.lessonLogs.filter(l => l.student_id === sId && l.date === dateStr);
+    
     dom.dayDetailContent.innerHTML = '';
-    dom.dayDetailContent.appendChild(container);
+    if (logs.length === 0) {
+      dom.dayDetailContent.innerHTML = '<p class="text-muted">この日の記録はありません。</p>';
+    } else {
+      const ul = document.createElement('ul');
+      ul.style.listStyle = 'none';
+      ul.style.padding = 0;
+      logs.forEach((l, idx) => {
+        const c = state.courses.find(cx => cx.course_id === l.course_id);
+        const li = document.createElement('li');
+        li.style.borderBottom = '1px solid #eee';
+        li.style.padding = '4px 0';
+        li.style.display = 'flex';
+        li.style.justifyContent = 'space-between';
+        
+        li.innerHTML = `
+          <span>
+            <span class="text-muted small">[${l.kind === 'planned' ? '予' : '実'}]</span> 
+            ${c ? c.course_name : l.course_id} 
+            <span style="font-weight:bold">×${l.count}</span>
+          </span>
+          <button class="btn small-btn danger-btn">削除</button>
+        `;
+        li.querySelector('button').addEventListener('click', () => {
+          // 削除処理
+          const targetIdx = state.lessonLogs.indexOf(l);
+          if (targetIdx > -1) {
+            state.lessonLogs.splice(targetIdx, 1);
+            DataService.markDirty('lessonLogs');
+            refreshStudentDetailView();
+          }
+        });
+        ul.appendChild(li);
+      });
+      dom.dayDetailContent.appendChild(ul);
+    }
   }
 
-  function onDayDetailAdd() {
-    const studentId = state.currentStudentId;
+  function onAddLog() {
+    const sId = state.currentStudentId;
     const dateStr = state.calendar.selectedDateStr;
-    if (!studentId) {
-      showGlobalMessage('先に生徒を選択してください。', 'error');
-      return;
-    }
-    if (!dateStr) {
-      showGlobalMessage('先にカレンダーで日付を選択してください。', 'error');
-      return;
-    }
-    const courseId = dom.dayDetailCourse.value;
-    const count = parseFloat(dom.dayDetailCount.value);
-    const kind = dom.dayDetailKind.value;
-
-    if (!courseId) {
-      showGlobalMessage('講座を選択してください。', 'error');
-      return;
-    }
-    if (!isFinite(count) || count <= 0) {
-      showGlobalMessage('コマ数は 0 より大きい数値を入力してください。', 'error');
+    const cId = dom.dayDetailCourse.value;
+    if (!sId || !dateStr || !cId) {
+      showGlobalMessage('日付と講座を選択してください', 'error');
       return;
     }
 
-    const newId = generateLogId(dateStr, studentId);
-    const nowIso = new Date().toISOString();
-    const log = {
-      log_id: newId,
+    state.lessonLogs.push({
+      log_id: `${dateStr}-${sId}-${Date.now()}`,
       date: dateStr,
-      student_id: studentId,
-      course_id: courseId,
-      count: String(count),
-      registered_by: Auth.currentUser ? Auth.currentUser.id : 'admin',
-      created_at: nowIso,
-      kind: kind
-    };
-    state.lessonLogs.push(log);
-    DataService.markDirty('lessonLogs');
-    renderCalendar(studentId);
-    renderDayDetail(dateStr);
-    renderStudentCoursesTable(studentId);
-    renderDashboardView();
-    recalcAnalytics();
-    showGlobalMessage('受講ログを追加しました。lesson_logs.csv をダウンロードして GitHub に反映してください。', 'success');
-  }
-
-  function generateLogId(dateStr, studentId) {
-    const sameDay = state.lessonLogs.filter(
-      l => l.date === dateStr && l.student_id === studentId
-    );
-    let maxSeq = 0;
-    sameDay.forEach(l => {
-      const parts = String(l.log_id || '').split('-');
-      const seqStr = parts[parts.length - 1];
-      const n = parseInt(seqStr, 10);
-      if (Number.isFinite(n) && n > maxSeq) maxSeq = n;
+      student_id: sId,
+      course_id: cId,
+      count: dom.logAddCount.value,
+      kind: dom.logAddKind.value,
+      registered_by: 'admin',
+      created_at: new Date().toISOString()
     });
-    const seq = maxSeq + 1;
-    const base = dateStr.replace(/-/g, '');
-    return `${base}-${studentId}-${seq}`;
+    DataService.markDirty('lessonLogs');
+    refreshStudentDetailView();
+    showGlobalMessage('追加しました', 'success', 1000);
   }
 
   // ---------------------------------------------------------
-  // 講座マスタ
+  // Courses
   // ---------------------------------------------------------
   function renderCoursesView() {
-    if (!state.dataLoaded) return;
     const tbody = dom.coursesTableBody;
     tbody.innerHTML = '';
+    const fGrade = $('#courses-filter-grade').value;
+    const query = $('#courses-filter-query').value.toLowerCase();
 
-    // フィルタ用対象学年
-    const grades = Array.from(new Set(state.courses.map(c => c.target_grade).filter(Boolean))).sort();
-    if (dom.coursesFilterGrade && dom.coursesFilterGrade.options.length <= 1) {
-      grades.forEach(g => {
-        const opt = document.createElement('option');
-        opt.value = g;
-        opt.textContent = g;
-        dom.coursesFilterGrade.appendChild(opt);
-      });
-    }
-
-    const filterGrade = dom.coursesFilterGrade.value;
-    const query = dom.coursesFilterQuery.value.trim().toLowerCase();
-
-    let courses = state.courses.slice();
-    if (filterGrade) {
-      courses = courses.filter(c => String(c.target_grade) === filterGrade);
-    }
-    if (query) {
-      courses = courses.filter(c =>
-        String(c.course_id).toLowerCase().includes(query) ||
-        String(c.course_name).toLowerCase().includes(query)
-      );
-    }
-
-    courses.sort((a, b) => String(a.course_id).localeCompare(String(b.course_id)));
-
-    if (!courses.length) {
-      const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 5;
-      td.textContent = '該当する講座がありません。';
-      td.className = 'text-muted';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-
-    const editable = Auth.currentUser.role === ROLES.ADMIN;
-
-    courses.forEach(course => {
+    state.courses.filter(c => {
+      if (fGrade && c.target_grade !== fGrade) return false;
+      if (query && !c.course_name.toLowerCase().includes(query)) return false;
+      return true;
+    }).forEach(c => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${course.course_id}</td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
+        <td>${c.course_id}</td>
+        <td><input value="${c.course_name}" style="width:100%"></td>
+        <td>${c.target_grade}</td>
+        <td>${c.standard_sessions}</td>
+        <td>${c.note}</td>
       `;
-      const nameTd = tr.children[1];
-      const gradeTd = tr.children[2];
-      const stdTd = tr.children[3];
-      const noteTd = tr.children[4];
-
-      if (editable) {
-        const nameInput = document.createElement('input');
-        nameInput.type = 'text';
-        nameInput.value = course.course_name || '';
-        nameInput.addEventListener('change', () => {
-          course.course_name = nameInput.value;
-          DataService.markDirty('courses');
-          renderDashboardView();
-          recalcAnalytics();
-        });
-        nameTd.appendChild(nameInput);
-
-        const gradeInput = document.createElement('input');
-        gradeInput.type = 'text';
-        gradeInput.value = course.target_grade || '';
-        gradeInput.style.width = '60px';
-        gradeInput.addEventListener('change', () => {
-          course.target_grade = gradeInput.value;
-          DataService.markDirty('courses');
-          renderDashboardView();
-          recalcAnalytics();
-        });
-        gradeTd.appendChild(gradeInput);
-
-        const stdInput = document.createElement('input');
-        stdInput.type = 'number';
-        stdInput.min = '0';
-        stdInput.step = '1';
-        stdInput.style.width = '80px';
-        stdInput.value = course.standard_sessions || '';
-        stdInput.addEventListener('change', () => {
-          course.standard_sessions = stdInput.value;
-          DataService.markDirty('courses');
-          renderDashboardView();
-          recalcAnalytics();
-        });
-        stdTd.appendChild(stdInput);
-
-        const noteInput = document.createElement('input');
-        noteInput.type = 'text';
-        noteInput.value = course.note || '';
-        noteInput.addEventListener('change', () => {
-          course.note = noteInput.value;
-          DataService.markDirty('courses');
-        });
-        noteTd.appendChild(noteInput);
-      } else {
-        nameTd.textContent = course.course_name || '';
-        gradeTd.textContent = course.target_grade || '';
-        stdTd.textContent = course.standard_sessions || '';
-        noteTd.textContent = course.note || '';
-      }
-
+      tr.querySelector('input').addEventListener('change', (e) => {
+        c.course_name = e.target.value;
+        DataService.markDirty('courses');
+      });
       tbody.appendChild(tr);
     });
   }
 
-  function onCourseAdd() {
-    const id = dom.courseAddId.value.trim();
-    const name = dom.courseAddName.value.trim();
-    const grade = dom.courseAddGrade.value.trim();
-    const standard = dom.courseAddStandard.value;
-    const note = dom.courseAddNote.value.trim();
-
-    if (!id) {
-      showGlobalMessage('講座IDを入力してください。', 'error');
-      return;
-    }
-    if (!name) {
-      showGlobalMessage('講座名を入力してください。', 'error');
-      return;
-    }
-    if (state.courses.some(c => c.course_id === id)) {
-      showGlobalMessage('同じ講座IDが既に存在します。', 'error');
-      return;
-    }
-
-    const row = {
-      course_id: id,
-      course_name: name,
-      target_grade: grade,
-      standard_sessions: standard || '0',
-      note: note
-    };
-    state.courses.push(row);
+  function onAddCourse() {
+    state.courses.push({
+      course_id: dom.courseAddId.value,
+      course_name: dom.courseAddName.value,
+      target_grade: dom.courseAddGrade.value,
+      standard_sessions: dom.courseAddStandard.value,
+      note: dom.courseAddNote.value
+    });
     DataService.markDirty('courses');
+    renderCoursesView();
     dom.courseAddId.value = '';
     dom.courseAddName.value = '';
-    dom.courseAddGrade.value = '';
-    dom.courseAddStandard.value = '0';
-    dom.courseAddNote.value = '';
-    renderCoursesView();
-    showGlobalMessage('講座を追加しました。courses.csv をダウンロードして GitHub に反映してください。', 'success');
   }
 
   // ---------------------------------------------------------
   // Analytics
   // ---------------------------------------------------------
-  function setupAnalyticsDefaultsIfNeeded() {
-    if (!dom.analyticsDateStart || !dom.analyticsDateEnd) return;
-    if (dom.analyticsDateStart.value && dom.analyticsDateEnd.value) return;
-    const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), 1);
-    dom.analyticsDateStart.value = dateToStr(start);
-    dom.analyticsDateEnd.value = dateToStr(today);
+  function setupAnalyticsDates() {
+    if (dom.anaStart.value) return;
+    const now = new Date();
+    dom.anaEnd.value = dateToStr(now);
+    now.setMonth(now.getMonth() - 1);
+    dom.anaStart.value = dateToStr(now);
   }
 
   function recalcAnalytics() {
-    if (!state.dataLoaded) return;
-    const startStr = dom.analyticsDateStart.value;
-    const endStr = dom.analyticsDateEnd.value;
-    const unit = dom.analyticsUnit.value;
-
-    let start = parseDate(startStr);
-    let end = parseDate(endStr);
-    if (!start || !end) {
-      showGlobalMessage('分析期間の日付を正しく入力してください。', 'error');
-      return;
-    }
-    if (end < start) {
-      const tmp = start;
-      start = end;
-      end = tmp;
-    }
+    const s = parseDate(dom.anaStart.value);
+    const e = parseDate(dom.anaEnd.value);
+    if (!s || !e) return;
 
     // 生徒別
-    const perStudent = computeStudentAchievement(start, end);
-    renderAnalyticsStudents(perStudent);
+    const studentStats = computeAchievements(s, e);
+    dom.anaStudentsBody.innerHTML = '';
+    studentStats.forEach(row => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${row.id}</td>
+        <td>${row.grade}</td>
+        <td>${row.planned.toFixed(1)}</td>
+        <td>${row.actual.toFixed(1)}</td>
+        <td>${formatPercent(row.rate)}</td>
+      `;
+      dom.anaStudentsBody.appendChild(tr);
+    });
 
     // 講座別
-    const perCourse = computeCourseAchievement(start, end);
-    renderAnalyticsCourses(perCourse);
-
-    // 全体推移
-    renderAnalyticsTimeline(start, end, unit);
-  }
-
-  function computeStudentAchievement(start, end) {
-    const results = [];
-    const students = state.students.slice();
-    students.forEach(s => {
-      const studentId = s.student_id;
-
-      // 計画コマ数: student_courses + 期間に応じて按分
-      let planned = 0;
-      const scList = state.studentCourses.filter(sc => sc.student_id === studentId);
-      scList.forEach(sc => {
-        const totalSessions = parseFloat(sc.planned_sessions || '0') || 0;
-        if (totalSessions <= 0) return;
-        const courseStart = sc.start_date ? parseDate(sc.start_date) : null;
-        const courseEnd = sc.end_date ? parseDate(sc.end_date) : null;
-        if (!courseStart || !courseEnd) {
-          planned += totalSessions;
-          return;
-        }
-        if (start && end) {
-          if (courseEnd < start || courseStart > end) {
-            return;
-          }
-          const totalDays = daysBetweenInclusive(courseStart, courseEnd);
-          const interStart = clampDateToRange(start, courseStart, courseEnd);
-          const interEnd = clampDateToRange(end, courseStart, courseEnd);
-          const interDays = daysBetweenInclusive(interStart, interEnd);
-          if (totalDays > 0) {
-            planned += totalSessions * (interDays / totalDays);
-          } else {
-            planned += totalSessions;
-          }
-        } else {
-          planned += totalSessions;
-        }
-      });
-
-      // 実績コマ数: lesson_logs 実績のみ
-      const logs = state.lessonLogs.filter(log => {
-        if (log.student_id !== studentId) return false;
-        if (isPlannedLog(log)) return false;
-        const dt = parseDate(log.date);
-        if (!dt) return false;
-        if (start && dt < start) return false;
-        if (end && dt > end) return false;
-        return true;
-      });
-      const actual = logs.reduce((sum, l) => sum + (parseFloat(l.count) || 0), 0);
-
-      results.push({ student: s, planned, actual });
-    });
-    return results;
-  }
-
-  function renderAnalyticsStudents(perStudent) {
-    const tbody = dom.analyticsStudentsBody;
-    tbody.innerHTML = '';
-    if (!perStudent.length) {
+    dom.anaCoursesBody.innerHTML = '';
+    state.courses.forEach(c => {
+      // 簡易計算: 期間内のログ合計
+      const logs = state.lessonLogs.filter(l => 
+        l.course_id === c.course_id && l.kind !== 'planned' &&
+        parseDate(l.date) >= s && parseDate(l.date) <= e
+      );
+      const actual = logs.reduce((sum, l) => sum + (parseFloat(l.count)||0), 0);
+      const students = new Set(logs.map(l => l.student_id)).size;
+      
       const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 5;
-      td.textContent = '表示できるデータがありません。';
-      td.className = 'text-muted';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-
-    perStudent.forEach(r => {
-      const tr = document.createElement('tr');
-      const s = r.student;
-      tr.innerHTML = `
-        <td>${s.student_id}</td>
-        <td>${s.grade || ''}</td>
-        <td>${r.planned.toFixed(1)}</td>
-        <td>${r.actual.toFixed(1)}</td>
-        <td>${formatPercent(r.planned > 0 ? r.actual / r.planned : NaN)}</td>
-      `;
-      tbody.appendChild(tr);
-    });
-  }
-
-  function computeCourseAchievement(start, end) {
-    const results = [];
-    const courses = state.courses.slice();
-    courses.forEach(c => {
-      const courseId = c.course_id;
-      const scList = state.studentCourses.filter(sc => sc.course_id === courseId);
-      const studentCount = new Set(scList.map(sc => sc.student_id)).size;
-
-      let planned = 0;
-      scList.forEach(sc => {
-        const totalSessions = parseFloat(sc.planned_sessions || '0') || 0;
-        if (totalSessions <= 0) return;
-        const courseStart = sc.start_date ? parseDate(sc.start_date) : null;
-        const courseEnd = sc.end_date ? parseDate(sc.end_date) : null;
-        if (!courseStart || !courseEnd) {
-          planned += totalSessions;
-          return;
-        }
-        if (start && end) {
-          if (courseEnd < start || courseStart > end) return;
-          const totalDays = daysBetweenInclusive(courseStart, courseEnd);
-          const interStart = clampDateToRange(start, courseStart, courseEnd);
-          const interEnd = clampDateToRange(end, courseStart, courseEnd);
-          const interDays = daysBetweenInclusive(interStart, interEnd);
-          if (totalDays > 0) {
-            planned += totalSessions * (interDays / totalDays);
-          } else {
-            planned += totalSessions;
-          }
-        } else {
-          planned += totalSessions;
-        }
-      });
-
-      const logs = state.lessonLogs.filter(log => {
-        if (log.course_id !== courseId) return false;
-        if (isPlannedLog(log)) return false;
-        const dt = parseDate(log.date);
-        if (!dt) return false;
-        if (start && dt < start) return false;
-        if (end && dt > end) return false;
-        return true;
-      });
-      const actual = logs.reduce((sum, l) => sum + (parseFloat(l.count) || 0), 0);
-
-      results.push({ course: c, studentCount, planned, actual });
-    });
-    return results;
-  }
-
-  function renderAnalyticsCourses(perCourse) {
-    const tbody = dom.analyticsCoursesBody;
-    tbody.innerHTML = '';
-    if (!perCourse.length) {
-      const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 6;
-      td.textContent = '表示できるデータがありません。';
-      td.className = 'text-muted';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      return;
-    }
-
-    perCourse.forEach(r => {
-      const tr = document.createElement('tr');
-      const c = r.course;
       tr.innerHTML = `
         <td>${c.course_id}</td>
-        <td>${c.course_name || ''}</td>
-        <td>${r.studentCount}</td>
-        <td>${r.planned.toFixed(1)}</td>
-        <td>${r.actual.toFixed(1)}</td>
-        <td>${formatPercent(r.planned > 0 ? r.actual / r.planned : NaN)}</td>
+        <td>${c.course_name}</td>
+        <td>${students}</td>
+        <td>-</td>
+        <td>${actual}</td>
+        <td>-</td>
       `;
-      tbody.appendChild(tr);
-    });
-  }
-
-  function renderAnalyticsTimeline(start, end, unit) {
-    const container = dom.analyticsTimeline;
-    container.innerHTML = '';
-
-    const actualLogs = state.lessonLogs.filter(log => {
-      if (isPlannedLog(log)) return false;
-      const dt = parseDate(log.date);
-      if (!dt) return false;
-      if (start && dt < start) return false;
-      if (end && dt > end) return false;
-      return true;
+      dom.anaCoursesBody.appendChild(tr);
     });
 
-    if (!actualLogs.length) {
-      const p = document.createElement('p');
-      p.className = 'text-muted';
-      p.textContent = '表示できる実績ログがありません。';
-      container.appendChild(p);
-      return;
-    }
+    // Timeline
+    renderTimeline(s, e);
+  }
 
-    const buckets = {};
-    actualLogs.forEach(log => {
-      const dt = parseDate(log.date);
-      if (!dt) return;
-      let key;
-      if (unit === 'day') {
-        key = dateToStr(dt);
-      } else if (unit === 'week') {
-        const monday = new Date(dt);
-        const day = dt.getDay(); // 0=Sun
-        const diff = (day + 6) % 7; // Monday=0
-        monday.setDate(dt.getDate() - diff);
-        key = dateToStr(monday);
-      } else if (unit === 'month') {
-        key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
-      }
-      const val = parseFloat(log.count) || 0;
-      buckets[key] = (buckets[key] || 0) + val;
+  function renderTimeline(start, end) {
+    const unit = dom.anaUnit.value;
+    const map = {};
+    
+    state.lessonLogs.forEach(l => {
+      if (l.kind === 'planned') return;
+      const d = parseDate(l.date);
+      if (d < start || d > end) return;
+      
+      let key = l.date;
+      if (unit === 'month') key = l.date.substring(0, 7); // YYYY-MM
+      // week処理は省略(簡易実装)
+
+      map[key] = (map[key] || 0) + (parseFloat(l.count)||0);
     });
 
-    const entries = Object.entries(buckets).sort((a, b) => a[0].localeCompare(b[0]));
-    const maxVal = entries.reduce((max, [, v]) => Math.max(max, v), 0) || 1;
+    dom.anaTimeline.innerHTML = '';
+    const barsContainer = document.createElement('div');
+    barsContainer.className = 'timeline-chart-bars';
+    
+    const keys = Object.keys(map).sort();
+    const max = Math.max(...Object.values(map)) || 1;
 
-    const barsWrapper = document.createElement('div');
-    barsWrapper.className = 'timeline-chart-bars';
-    entries.forEach(([key, value]) => {
-      const barWrapper = document.createElement('div');
-      barWrapper.style.display = 'flex';
-      barWrapper.style.flexDirection = 'column';
-      barWrapper.style.alignItems = 'center';
-
-      const bar = document.createElement('div');
-      bar.className = 'timeline-bar';
-      const heightPercent = (value / maxVal) * 100;
-      bar.style.height = `${heightPercent}%`;
-
-      const valueLabel = document.createElement('div');
-      valueLabel.className = 'timeline-bar-value';
-      valueLabel.textContent = value.toFixed(0);
-
-      bar.appendChild(valueLabel);
-
-      const label = document.createElement('div');
-      label.className = 'timeline-bar-label';
-      label.textContent = key;
-
-      barWrapper.appendChild(bar);
-      barWrapper.appendChild(label);
-      barsWrapper.appendChild(barWrapper);
+    keys.forEach(k => {
+      const h = (map[k] / max) * 100;
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.alignItems = 'center';
+      wrap.innerHTML = `
+        <div class="timeline-bar" style="height:${Math.max(h, 1)}%">
+          <div class="timeline-bar-value">${map[k]}</div>
+        </div>
+        <div class="timeline-bar-label">${k}</div>
+      `;
+      barsContainer.appendChild(wrap);
     });
-
-    container.appendChild(barsWrapper);
+    dom.anaTimeline.appendChild(barsContainer);
   }
 
-  // ---------------------------------------------------------
-  // Settings
-  // ---------------------------------------------------------
-  function refreshSettingsView() {
-    if (!Auth.currentUser) return;
-    setText(dom.settingsLoginId, Auth.currentUser.id);
-    const roleLabel =
-      Auth.currentUser.role === ROLES.ADMIN ? '管理者' :
-      Auth.currentUser.role === ROLES.TEACHER ? '講師' :
-      '生徒';
-    setText(dom.settingsRole, roleLabel);
-    dom.passwordChangeMessage.textContent = '';
-    dom.currentPassword.value = '';
-    dom.newPassword.value = '';
-    dom.newPasswordConfirm.value = '';
-  }
-
-  function onPasswordChangeSubmit(e) {
-    e.preventDefault();
-    const currentPw = dom.currentPassword.value;
-    const newPw = dom.newPassword.value;
-    const newPw2 = dom.newPasswordConfirm.value;
-    dom.passwordChangeMessage.textContent = '';
-    dom.passwordChangeMessage.className = 'small';
-
-    if (!newPw || newPw.length < 4) {
-      dom.passwordChangeMessage.textContent = '新しいパスワードは 4 文字以上にしてください。';
-      dom.passwordChangeMessage.classList.add('error-text');
-      return;
-    }
-    if (newPw !== newPw2) {
-      dom.passwordChangeMessage.textContent = '新しいパスワード（確認）が一致しません。';
-      dom.passwordChangeMessage.classList.add('error-text');
-      return;
-    }
-
-    try {
-      Auth.changePassword(currentPw, newPw);
-      dom.passwordChangeMessage.textContent = 'パスワードを変更しました。次回ログインから有効になります。';
-      dom.passwordChangeMessage.classList.remove('error-text');
-    } catch (err) {
-      dom.passwordChangeMessage.textContent = err.message || 'パスワード変更に失敗しました。';
-      dom.passwordChangeMessage.classList.add('error-text');
-    } finally {
-      dom.currentPassword.value = '';
-      dom.newPassword.value = '';
-      dom.newPasswordConfirm.value = '';
-    }
-  }
-
-  // ---------------------------------------------------------
-  // end of IIFE
-  // ---------------------------------------------------------
 })();
