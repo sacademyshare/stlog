@@ -8,55 +8,26 @@
 </head>
 <body>
   <div id="app-root">
-    <!-- ログインビュー -->
-    <div id="login-view" class="view">
-      <div class="login-card card">
-        <h1 class="app-title">映像授業受講状況管理</h1>
-        <p class="app-subtitle">学習塾用 Web アプリ（GitHub Pages 運用想定）</p>
-
-        <form id="login-form" class="form">
-          <div class="form-row">
-            <label for="login-id">ログインID</label>
-            <input id="login-id" name="login-id" type="text" autocomplete="username" required>
-          </div>
-          <div class="form-row">
-            <label for="login-password">パスワード</label>
-            <input id="login-password" name="login-password" type="password" autocomplete="current-password" required>
-          </div>
-          <div class="form-row">
-            <button type="submit" class="btn primary-btn full-width">ログイン</button>
-          </div>
-          <p class="login-note">
-            擬似ログインです。誤操作防止と役割切り替えのための簡易認証となります。<br>
-            初期ID例：<code>admin / admin123</code>、<code>teacher1 / teacher123</code>、<code>S001 / student001</code>
-          </p>
-          <p id="login-error" class="error-text" aria-live="polite"></p>
-        </form>
-      </div>
-    </div>
-
-    <!-- メインアプリビュー -->
-    <div id="main-view" class="view hidden">
+    <!-- メインアプリビュー (ログインなしで即表示) -->
+    <div id="main-view" class="view">
       <header class="app-header">
         <div class="header-left">
           <h1 class="app-title small">映像授業受講状況管理</h1>
         </div>
         <div class="header-right">
           <div class="user-info">
-            <span id="header-user-label"></span>
-            <span id="header-user-role" class="user-role-badge"></span>
+            <span class="user-role-badge">Admin Mode</span>
           </div>
-          <button id="btn-logout" class="btn ghost-btn">ログアウト</button>
         </div>
       </header>
 
       <nav class="app-nav">
         <button class="nav-btn active" data-target-view="dashboard">ダッシュボード</button>
-        <button class="nav-btn" data-target-view="students" data-role-visible="admin,teacher">生徒一覧</button>
+        <button class="nav-btn" data-target-view="students">生徒一覧</button>
         <button class="nav-btn" data-target-view="student-detail">生徒詳細 / カレンダー</button>
-        <button class="nav-btn" data-target-view="courses" data-role-visible="admin,teacher">講座マスタ</button>
-        <button class="nav-btn" data-target-view="analytics" data-role-visible="admin,teacher">分析</button>
-        <button class="nav-btn" data-target-view="settings">設定</button>
+        <button class="nav-btn" data-target-view="courses">講座マスタ</button>
+        <button class="nav-btn" data-target-view="analytics">分析</button>
+        <button class="nav-btn" data-target-view="settings">データ管理</button>
       </nav>
 
       <main class="app-main">
@@ -124,7 +95,7 @@
                     </tr>
                   </thead>
                   <tbody id="dashboard-student-summary-body">
-                    <tr><td colspan="6" class="text-muted">データ読込中、または該当データがありません。</td></tr>
+                    <tr><td colspan="6" class="text-muted">データ読込中...</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -137,7 +108,7 @@
           <div class="view-header">
             <h2>生徒一覧</h2>
             <p class="view-description">
-              匿名IDベースの生徒マスタです。実名などの個人情報は別管理としてください。
+              生徒マスタデータの確認・検索を行います。
             </p>
           </div>
 
@@ -182,7 +153,7 @@
                     </tr>
                   </thead>
                   <tbody id="students-table-body">
-                    <tr><td colspan="5" class="text-muted">データ読込中、または該当データがありません。</td></tr>
+                    <tr><td colspan="5" class="text-muted">データ読込中...</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -195,7 +166,7 @@
           <div class="view-header">
             <h2>生徒詳細 / カレンダー</h2>
             <p class="view-description">
-              生徒ごとの受講講座と進捗、日別カレンダーを確認・入力する画面です。
+              個別の生徒の受講予定作成・実績入力を行います。
             </p>
           </div>
 
@@ -203,19 +174,18 @@
             <div class="card-header">
               <div class="flex-between">
                 <div>
-                  <h3>生徒情報</h3>
-                  <p id="student-detail-info" class="text-muted"></p>
+                  <h3>対象生徒選択</h3>
                 </div>
                 <div>
                   <label>
-                    生徒IDを選択:
+                    生徒ID:
                     <select id="student-detail-select"></select>
                   </label>
                 </div>
               </div>
             </div>
             <div class="card-body">
-              <p id="student-detail-hint" class="text-muted"></p>
+              <p id="student-detail-info" class="text-muted" style="margin: 0; font-weight: bold;"></p>
             </div>
           </div>
 
@@ -225,8 +195,8 @@
                 <div class="card-header">
                   <div class="flex-between">
                     <h3>講座紐づけ・進捗</h3>
-                    <button id="btn-download-student-courses" class="btn small-btn" data-role-visible="admin">
-                      student_courses.csv をダウンロード
+                    <button id="btn-download-student-courses" class="btn small-btn">
+                      student_courses.csv DL
                     </button>
                   </div>
                 </div>
@@ -249,7 +219,7 @@
                     </table>
                   </div>
 
-                  <div id="student-course-add" class="mt-md" data-role-visible="admin">
+                  <div id="student-course-add" class="mt-md">
                     <h4>講座追加</h4>
                     <div class="form-grid">
                       <label>
@@ -268,7 +238,7 @@
                         終了日:
                         <input id="student-course-add-end" type="date">
                       </label>
-                      <button id="btn-student-course-add" class="btn small-btn">追加</button>
+                      <button id="btn-student-course-add" class="btn small-btn primary-btn">追加</button>
                     </div>
                   </div>
                 </div>
@@ -297,11 +267,11 @@
 
                   <div id="day-detail" class="day-detail card subtle-card">
                     <div class="card-header">
-                      <h4 id="day-detail-title">日付をクリックすると詳細が表示されます。</h4>
+                      <h4 id="day-detail-title">日付を選択してください</h4>
                     </div>
                     <div class="card-body">
                       <div id="day-detail-content">
-                        <p class="text-muted">まだ日付が選択されていません。</p>
+                        <p class="text-muted">カレンダーの日付をクリックすると、その日の予定・実績が表示されます。</p>
                       </div>
 
                       <div id="day-detail-form-wrapper" class="mt-md">
@@ -322,10 +292,10 @@
                               <option value="planned">予定</option>
                             </select>
                           </label>
-                          <button id="btn-day-detail-add" class="btn small-btn">追加</button>
+                          <button id="btn-day-detail-add" class="btn small-btn primary-btn">追加</button>
                         </div>
                         <p class="text-muted small">
-                          追加後は lesson_logs.csv をダウンロードして GitHub にコミットしてください。
+                          ※追加・変更後は必ず CSV をダウンロードして GitHub へアップロードしてください。
                         </p>
                       </div>
                     </div>
@@ -347,7 +317,7 @@
           <div class="view-header">
             <h2>講座マスタ</h2>
             <p class="view-description">
-              講座ID・名称・対象学年などのマスタデータです。
+              講座の追加・編集を行います。
             </p>
           </div>
 
@@ -363,7 +333,7 @@
                   </label>
                   <label>
                     キーワード:
-                    <input id="courses-filter-query" type="text" placeholder="講座名・講座IDなど">
+                    <input id="courses-filter-query" type="text" placeholder="講座名・IDなど">
                   </label>
                 </div>
                 <div class="action-group">
@@ -384,25 +354,25 @@
                     </tr>
                   </thead>
                   <tbody id="courses-table-body">
-                    <tr><td colspan="5" class="text-muted">データ読込中、または該当データがありません。</td></tr>
+                    <tr><td colspan="5" class="text-muted">データ読込中...</td></tr>
                   </tbody>
                 </table>
               </div>
 
-              <div id="course-add" class="mt-md" data-role-visible="admin">
+              <div id="course-add" class="mt-md">
                 <h3>講座追加</h3>
                 <div class="form-grid">
                   <label>
                     講座ID:
-                    <input id="course-add-id" type="text" placeholder="例: E1-S1">
+                    <input id="course-add-id" type="text" placeholder="E1-S1">
                   </label>
                   <label>
                     講座名:
-                    <input id="course-add-name" type="text" placeholder="例: 高1英文法S 第1期">
+                    <input id="course-add-name" type="text" placeholder="高1英文法S">
                   </label>
                   <label>
                     対象学年:
-                    <input id="course-add-grade" type="text" placeholder="例: H1">
+                    <input id="course-add-grade" type="text" placeholder="H1">
                   </label>
                   <label>
                     標準講数:
@@ -412,7 +382,7 @@
                     メモ:
                     <input id="course-add-note" type="text">
                   </label>
-                  <button id="btn-course-add" class="btn small-btn">追加</button>
+                  <button id="btn-course-add" class="btn small-btn primary-btn">追加</button>
                 </div>
               </div>
             </div>
@@ -424,7 +394,7 @@
           <div class="view-header">
             <h2>分析</h2>
             <p class="view-description">
-              生徒別・講座別・全体推移の簡易分析を行います（CSV ベースの集計）。
+              期間を指定して集計を行います。
             </p>
           </div>
 
@@ -449,7 +419,7 @@
                       <option value="month">月単位</option>
                     </select>
                   </label>
-                  <button id="btn-analytics-recalc" class="btn small-btn">再集計</button>
+                  <button id="btn-analytics-recalc" class="btn small-btn primary-btn">再集計</button>
                 </div>
               </div>
             </div>
@@ -462,13 +432,13 @@
                       <tr>
                         <th>生徒ID</th>
                         <th>学年</th>
-                        <th>計画コマ数（推計）</th>
+                        <th>計画コマ数</th>
                         <th>実績コマ数</th>
                         <th>達成率</th>
                       </tr>
                     </thead>
                     <tbody id="analytics-students-body">
-                      <tr><td colspan="5" class="text-muted">集計結果がここに表示されます。</td></tr>
+                      <tr><td colspan="5" class="text-muted">集計待ち...</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -483,13 +453,13 @@
                         <th>講座ID</th>
                         <th>講座名</th>
                         <th>受講者数</th>
-                        <th>計画コマ数（推計）</th>
-                        <th>実績コマ数</th>
+                        <th>計画</th>
+                        <th>実績</th>
                         <th>平均達成率</th>
                       </tr>
                     </thead>
                     <tbody id="analytics-courses-body">
-                      <tr><td colspan="6" class="text-muted">集計結果がここに表示されます。</td></tr>
+                      <tr><td colspan="6" class="text-muted">集計待ち...</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -498,73 +468,45 @@
               <div class="analytics-section">
                 <h3>全体推移（棒グラフ）</h3>
                 <div id="analytics-timeline" class="timeline-chart">
-                  <p class="text-muted">集計結果がここに棒グラフとして表示されます。</p>
+                  <p class="text-muted">集計を実行してください。</p>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        <!-- 設定 -->
+        <!-- データ管理 -->
         <section id="view-settings" class="content-view">
           <div class="view-header">
-            <h2>設定</h2>
+            <h2>データ管理</h2>
             <p class="view-description">
-              パスワード変更やデータ再読み込みなどの操作を行います。
+              GitHubとのデータ同期（手動）や設定リセットを行います。
             </p>
           </div>
 
           <div class="settings-grid">
             <div class="card">
               <div class="card-header">
-                <h3>ログイン情報</h3>
+                <h3>データ再読み込み</h3>
               </div>
               <div class="card-body">
-                <p><strong>ログインID:</strong> <span id="settings-login-id"></span></p>
-                <p><strong>ロール:</strong> <span id="settings-role"></span></p>
                 <p class="text-muted small">
-                  ID 自体は GitHub 上に保存されるデータとは無関係な、擬似ログイン用のものです。
+                  GitHub 上の最新の CSV ファイルを取得して画面を更新します。<br>
+                  ※ローカルで編集中の未保存データは破棄されます。
                 </p>
+                <button id="btn-reload-data" class="btn small-btn">GitHub から再読み込み</button>
               </div>
             </div>
 
             <div class="card">
               <div class="card-header">
-                <h3>パスワード変更</h3>
+                <h3>ローカルキャッシュクリア</h3>
               </div>
               <div class="card-body">
-                <form id="password-change-form" class="form">
-                  <div class="form-row">
-                    <label for="current-password">現在のパスワード</label>
-                    <input id="current-password" type="password" autocomplete="current-password" required>
-                  </div>
-                  <div class="form-row">
-                    <label for="new-password">新しいパスワード</label>
-                    <input id="new-password" type="password" autocomplete="new-password" required>
-                  </div>
-                  <div class="form-row">
-                    <label for="new-password-confirm">新しいパスワード（確認）</label>
-                    <input id="new-password-confirm" type="password" autocomplete="new-password" required>
-                  </div>
-                  <div class="form-row">
-                    <button type="submit" class="btn primary-btn">パスワードを変更</button>
-                  </div>
-                  <p id="password-change-message" class="small" aria-live="polite"></p>
-                </form>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card-header">
-                <h3>データ管理</h3>
-              </div>
-              <div class="card-body">
-                <button id="btn-reload-data" class="btn small-btn">GitHub の CSV を再読み込み</button>
-                <button id="btn-clear-local-storage" class="btn small-btn danger-btn">ローカル設定を初期化</button>
                 <p class="text-muted small">
-                  ローカル設定の初期化は、パスワード変更やログイン状態、その他ブラウザ保存情報をクリアします。<br>
-                  CSV データ自体は GitHub 上のファイルに依存するため削除されません。
+                  ブラウザに保存されている一時データを削除してリセットします。
                 </p>
+                <button id="btn-clear-local-storage" class="btn small-btn danger-btn">リセット</button>
               </div>
             </div>
           </div>
