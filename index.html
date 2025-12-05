@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>映像授業受講状況管理</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app-root">
+    <!-- ログインビュー -->
+    <div id="login-view" class="view">
+      <div class="login-card card">
+        <h1 class="app-title">映像授業受講状況管理</h1>
+        <p class="app-subtitle">学習塾用 Web アプリ（GitHub Pages 運用想定）</p>
+
+        <form id="login-form" class="form">
+          <div class="form-row">
+            <label for="login-id">ログインID</label>
+            <input id="login-id" name="login-id" type="text" autocomplete="username" required>
+          </div>
+          <div class="form-row">
+            <label for="login-password">パスワード</label>
+            <input id="login-password" name="login-password" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="form-row">
+            <button type="submit" class="btn primary-btn full-width">ログイン</button>
+          </div>
+          <p class="login-note">
+            擬似ログインです。誤操作防止と役割切り替えのための簡易認証となります。<br>
+            初期ID例：<code>admin / admin123</code>、<code>teacher1 / teacher123</code>、<code>S001 / student001</code>
+          </p>
+          <p id="login-error" class="error-text" aria-live="polite"></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- メインアプリビュー -->
+    <div id="main-view" class="view hidden">
+      <header class="app-header">
+        <div class="header-left">
+          <h1 class="app-title small">映像授業受講状況管理</h1>
+        </div>
+        <div class="header-right">
+          <div class="user-info">
+            <span id="header-user-label"></span>
+            <span id="header-user-role" class="user-role-badge"></span>
+          </div>
+          <button id="btn-logout" class="btn ghost-btn">ログアウト</button>
+        </div>
+      </header>
+
+      <nav class="app-nav">
+        <button class="nav-btn active" data-target-view="dashboard">ダッシュボード</button>
+        <button class="nav-btn" data-target-view="students" data-role-visible="admin,teacher">生徒一覧</button>
+        <button class="nav-btn" data-target-view="student-detail">生徒詳細 / カレンダー</button>
+        <button class="nav-btn" data-target-view="courses" data-role-visible="admin,teacher">講座マスタ</button>
+        <button class="nav-btn" data-target-view="analytics" data-role-visible="admin,teacher">分析</button>
+        <button class="nav-btn" data-target-view="settings">設定</button>
+      </nav>
+
+      <main class="app-main">
+        <div id="global-message" class="global-message hidden" aria-live="polite"></div>
+        <div id="unsaved-indicator" class="unsaved-indicator hidden">
+          未保存の変更があります。CSV をダウンロードして GitHub に反映してください。
+        </div>
+
+        <!-- ダッシュボード -->
+        <section id="view-dashboard" class="content-view active">
+          <div class="view-header">
+            <h2>ダッシュボード</h2>
+            <p class="view-description">
+              全体の受講状況と直近の進捗を一目で確認する画面です。
+            </p>
+          </div>
+
+          <div class="dashboard-grid">
+            <div class="card kpi-card">
+              <div class="card-header">
+                <h3>アクティブ生徒数</h3>
+              </div>
+              <div class="card-body kpi-body">
+                <span id="kpi-active-students" class="kpi-value">-</span>
+                <span class="kpi-label">active status の生徒</span>
+              </div>
+            </div>
+
+            <div class="card kpi-card">
+              <div class="card-header">
+                <h3>今月の受講コマ数</h3>
+              </div>
+              <div class="card-body kpi-body">
+                <span id="kpi-month-logs" class="kpi-value">-</span>
+                <span class="kpi-label">実績（今月）</span>
+              </div>
+            </div>
+
+            <div class="card kpi-card">
+              <div class="card-header">
+                <h3>平均達成率（全生徒）</h3>
+              </div>
+              <div class="card-body kpi-body">
+                <span id="kpi-avg-achievement" class="kpi-value">-</span>
+                <span class="kpi-label">予定 vs 実績（全期間換算）</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="dashboard-student-summary" class="card">
+            <div class="card-header">
+              <h3 id="dashboard-student-summary-title">生徒別進捗サマリ</h3>
+            </div>
+            <div class="card-body">
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>生徒ID</th>
+                      <th>学年</th>
+                      <th>コース群</th>
+                      <th>計画コマ数</th>
+                      <th>実績コマ数</th>
+                      <th>達成率</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashboard-student-summary-body">
+                    <tr><td colspan="6" class="text-muted">データ読込中、または該当データがありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 生徒一覧 -->
+        <section id="view-students" class="content-view">
+          <div class="view-header">
+            <h2>生徒一覧</h2>
+            <p class="view-description">
+              匿名IDベースの生徒マスタです。実名などの個人情報は別管理としてください。
+            </p>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="flex-between">
+                <div class="filter-group">
+                  <label>
+                    学年:
+                    <select id="students-filter-grade">
+                      <option value="">すべて</option>
+                    </select>
+                  </label>
+                  <label>
+                    ステータス:
+                    <select id="students-filter-status">
+                      <option value="">すべて</option>
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                    </select>
+                  </label>
+                  <label>
+                    生徒ID検索:
+                    <input id="students-filter-id" type="text" placeholder="S001 など">
+                  </label>
+                </div>
+                <div class="action-group">
+                  <button id="btn-download-students" class="btn small-btn">students.csv をダウンロード</button>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>生徒ID</th>
+                      <th>学年</th>
+                      <th>コース群</th>
+                      <th>ステータス</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="students-table-body">
+                    <tr><td colspan="5" class="text-muted">データ読込中、または該当データがありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 生徒詳細 / カレンダー -->
+        <section id="view-student-detail" class="content-view">
+          <div class="view-header">
+            <h2>生徒詳細 / カレンダー</h2>
+            <p class="view-description">
+              生徒ごとの受講講座と進捗、日別カレンダーを確認・入力する画面です。
+            </p>
+          </div>
+
+          <div id="student-detail-header" class="card">
+            <div class="card-header">
+              <div class="flex-between">
+                <div>
+                  <h3>生徒情報</h3>
+                  <p id="student-detail-info" class="text-muted"></p>
+                </div>
+                <div>
+                  <label>
+                    生徒IDを選択:
+                    <select id="student-detail-select"></select>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <p id="student-detail-hint" class="text-muted"></p>
+            </div>
+          </div>
+
+          <div class="split-layout">
+            <div class="split-left">
+              <div class="card">
+                <div class="card-header">
+                  <div class="flex-between">
+                    <h3>講座紐づけ・進捗</h3>
+                    <button id="btn-download-student-courses" class="btn small-btn" data-role-visible="admin">
+                      student_courses.csv をダウンロード
+                    </button>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>講座ID</th>
+                          <th>講座名</th>
+                          <th>予定講数</th>
+                          <th>実績</th>
+                          <th>達成率</th>
+                          <th>期間</th>
+                        </tr>
+                      </thead>
+                      <tbody id="student-courses-body">
+                        <tr><td colspan="6" class="text-muted">生徒を選択してください。</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div id="student-course-add" class="mt-md" data-role-visible="admin">
+                    <h4>講座追加</h4>
+                    <div class="form-grid">
+                      <label>
+                        講座:
+                        <select id="student-course-add-course"></select>
+                      </label>
+                      <label>
+                        予定講数:
+                        <input id="student-course-add-planned" type="number" min="0" step="1" value="0">
+                      </label>
+                      <label>
+                        開始日:
+                        <input id="student-course-add-start" type="date">
+                      </label>
+                      <label>
+                        終了日:
+                        <input id="student-course-add-end" type="date">
+                      </label>
+                      <button id="btn-student-course-add" class="btn small-btn">追加</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="split-right">
+              <div class="card">
+                <div class="card-header">
+                  <div class="flex-between">
+                    <h3>受講カレンダー</h3>
+                    <div class="calendar-controls">
+                      <button id="btn-cal-prev" class="btn icon-btn" title="前の月">&lt;</button>
+                      <span id="calendar-month-label"></span>
+                      <button id="btn-cal-next" class="btn icon-btn" title="次の月">&gt;</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="calendar-wrapper">
+                    <div class="calendar-weekdays">
+                      <div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div>
+                    </div>
+                    <div id="calendar-grid" class="calendar-grid"></div>
+                  </div>
+
+                  <div id="day-detail" class="day-detail card subtle-card">
+                    <div class="card-header">
+                      <h4 id="day-detail-title">日付をクリックすると詳細が表示されます。</h4>
+                    </div>
+                    <div class="card-body">
+                      <div id="day-detail-content">
+                        <p class="text-muted">まだ日付が選択されていません。</p>
+                      </div>
+
+                      <div id="day-detail-form-wrapper" class="mt-md">
+                        <h4>受講予定 / 実績を追加</h4>
+                        <div class="form-grid compact">
+                          <label>
+                            講座:
+                            <select id="day-detail-course"></select>
+                          </label>
+                          <label>
+                            コマ数:
+                            <input id="day-detail-count" type="number" min="0" step="1" value="1">
+                          </label>
+                          <label>
+                            種別:
+                            <select id="day-detail-kind">
+                              <option value="actual">実績</option>
+                              <option value="planned">予定</option>
+                            </select>
+                          </label>
+                          <button id="btn-day-detail-add" class="btn small-btn">追加</button>
+                        </div>
+                        <p class="text-muted small">
+                          追加後は lesson_logs.csv をダウンロードして GitHub にコミットしてください。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mt-md">
+                    <button id="btn-download-lesson-logs" class="btn small-btn">
+                      lesson_logs.csv をダウンロード
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 講座マスタ -->
+        <section id="view-courses" class="content-view">
+          <div class="view-header">
+            <h2>講座マスタ</h2>
+            <p class="view-description">
+              講座ID・名称・対象学年などのマスタデータです。
+            </p>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="flex-between">
+                <div class="filter-group">
+                  <label>
+                    対象学年:
+                    <select id="courses-filter-grade">
+                      <option value="">すべて</option>
+                    </select>
+                  </label>
+                  <label>
+                    キーワード:
+                    <input id="courses-filter-query" type="text" placeholder="講座名・講座IDなど">
+                  </label>
+                </div>
+                <div class="action-group">
+                  <button id="btn-download-courses" class="btn small-btn">courses.csv をダウンロード</button>
+                </div>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>講座ID</th>
+                      <th>講座名</th>
+                      <th>対象学年</th>
+                      <th>標準講数</th>
+                      <th>メモ</th>
+                    </tr>
+                  </thead>
+                  <tbody id="courses-table-body">
+                    <tr><td colspan="5" class="text-muted">データ読込中、または該当データがありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div id="course-add" class="mt-md" data-role-visible="admin">
+                <h3>講座追加</h3>
+                <div class="form-grid">
+                  <label>
+                    講座ID:
+                    <input id="course-add-id" type="text" placeholder="例: E1-S1">
+                  </label>
+                  <label>
+                    講座名:
+                    <input id="course-add-name" type="text" placeholder="例: 高1英文法S 第1期">
+                  </label>
+                  <label>
+                    対象学年:
+                    <input id="course-add-grade" type="text" placeholder="例: H1">
+                  </label>
+                  <label>
+                    標準講数:
+                    <input id="course-add-standard" type="number" min="0" step="1" value="0">
+                  </label>
+                  <label class="full-width">
+                    メモ:
+                    <input id="course-add-note" type="text">
+                  </label>
+                  <button id="btn-course-add" class="btn small-btn">追加</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 分析 -->
+        <section id="view-analytics" class="content-view">
+          <div class="view-header">
+            <h2>分析</h2>
+            <p class="view-description">
+              生徒別・講座別・全体推移の簡易分析を行います（CSV ベースの集計）。
+            </p>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="flex-between">
+                <h3>集計条件</h3>
+                <div class="filter-group">
+                  <label>
+                    期間（開始）:
+                    <input id="analytics-date-start" type="date">
+                  </label>
+                  <label>
+                    期間（終了）:
+                    <input id="analytics-date-end" type="date">
+                  </label>
+                  <label>
+                    集計単位:
+                    <select id="analytics-unit">
+                      <option value="day">日単位</option>
+                      <option value="week">週単位</option>
+                      <option value="month">月単位</option>
+                    </select>
+                  </label>
+                  <button id="btn-analytics-recalc" class="btn small-btn">再集計</button>
+                </div>
+              </div>
+            </div>
+            <div class="card-body analytics-body">
+              <div class="analytics-section">
+                <h3>生徒別サマリ</h3>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>生徒ID</th>
+                        <th>学年</th>
+                        <th>計画コマ数（推計）</th>
+                        <th>実績コマ数</th>
+                        <th>達成率</th>
+                      </tr>
+                    </thead>
+                    <tbody id="analytics-students-body">
+                      <tr><td colspan="5" class="text-muted">集計結果がここに表示されます。</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="analytics-section">
+                <h3>講座別サマリ</h3>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>講座ID</th>
+                        <th>講座名</th>
+                        <th>受講者数</th>
+                        <th>計画コマ数（推計）</th>
+                        <th>実績コマ数</th>
+                        <th>平均達成率</th>
+                      </tr>
+                    </thead>
+                    <tbody id="analytics-courses-body">
+                      <tr><td colspan="6" class="text-muted">集計結果がここに表示されます。</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="analytics-section">
+                <h3>全体推移（棒グラフ）</h3>
+                <div id="analytics-timeline" class="timeline-chart">
+                  <p class="text-muted">集計結果がここに棒グラフとして表示されます。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 設定 -->
+        <section id="view-settings" class="content-view">
+          <div class="view-header">
+            <h2>設定</h2>
+            <p class="view-description">
+              パスワード変更やデータ再読み込みなどの操作を行います。
+            </p>
+          </div>
+
+          <div class="settings-grid">
+            <div class="card">
+              <div class="card-header">
+                <h3>ログイン情報</h3>
+              </div>
+              <div class="card-body">
+                <p><strong>ログインID:</strong> <span id="settings-login-id"></span></p>
+                <p><strong>ロール:</strong> <span id="settings-role"></span></p>
+                <p class="text-muted small">
+                  ID 自体は GitHub 上に保存されるデータとは無関係な、擬似ログイン用のものです。
+                </p>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>パスワード変更</h3>
+              </div>
+              <div class="card-body">
+                <form id="password-change-form" class="form">
+                  <div class="form-row">
+                    <label for="current-password">現在のパスワード</label>
+                    <input id="current-password" type="password" autocomplete="current-password" required>
+                  </div>
+                  <div class="form-row">
+                    <label for="new-password">新しいパスワード</label>
+                    <input id="new-password" type="password" autocomplete="new-password" required>
+                  </div>
+                  <div class="form-row">
+                    <label for="new-password-confirm">新しいパスワード（確認）</label>
+                    <input id="new-password-confirm" type="password" autocomplete="new-password" required>
+                  </div>
+                  <div class="form-row">
+                    <button type="submit" class="btn primary-btn">パスワードを変更</button>
+                  </div>
+                  <p id="password-change-message" class="small" aria-live="polite"></p>
+                </form>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>データ管理</h3>
+              </div>
+              <div class="card-body">
+                <button id="btn-reload-data" class="btn small-btn">GitHub の CSV を再読み込み</button>
+                <button id="btn-clear-local-storage" class="btn small-btn danger-btn">ローカル設定を初期化</button>
+                <p class="text-muted small">
+                  ローカル設定の初期化は、パスワード変更やログイン状態、その他ブラウザ保存情報をクリアします。<br>
+                  CSV データ自体は GitHub 上のファイルに依存するため削除されません。
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
